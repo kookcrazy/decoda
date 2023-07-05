@@ -11,7 +11,7 @@ Lua IDE and Debuger
 * 增加了自用的一些关键字高亮显示（class、switch、case等），不影响官方Lua版本代码的使用
 
 ## 未来可能
-由于Decoda是通过注入DLL的方式来实现Hook，不适合跨平台移植和远程调试，可能会考虑MobDebug
+由于Decoda是通过注入DLL的方式来实现Hook，不适合跨平台移植和远程调试，可能会考虑支持MobDebug
 
 
 
