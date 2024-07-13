@@ -113,6 +113,11 @@ public:
      */
     void OnGoToSourceCode(wxCommandEvent& event);
 
+#ifdef _KOOK_DECODA_
+	void ClearAllBreakpoints();
+	void ClearBreakpoints(Project::File* file);
+#endif
+
 private:
 
     enum

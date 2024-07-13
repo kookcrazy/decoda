@@ -108,7 +108,9 @@ public:
      * Flushes the buffers, causing any written data to be sent.
      */
     void Flush();
-
+#ifdef _KOOK_DECODA_
+	bool IsValid();
+#endif
 private:
 
     /**

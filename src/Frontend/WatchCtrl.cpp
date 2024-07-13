@@ -364,10 +364,24 @@ wxString WatchCtrl::GetTableAsText(wxXmlNode* root)
 
     // Add the elements of the table as tree children.
 
-    wxString result = "{";
+#ifdef _KOOK_DECODA_
+    wxString result = "";
+    wxString type;
+
+	wxXmlNode* node = FindChildNode(root, "type");
+	if (node) {
+		result = node->GetNodeContent();
+	}
+
+	result.append("{");
+
+    node = root->GetChildren();
+#else
+	wxString result = "{";
     wxString type;
 
     wxXmlNode* node = root->GetChildren();
+#endif
 
     int numElements = 0;
 
@@ -408,6 +422,62 @@ wxString WatchCtrl::GetTableAsText(wxXmlNode* root)
     return result;
 
 }
+
+#ifdef _KOOK_DECODA_
+wxString WatchCtrl::GetClassObjAsText(wxXmlNode* root)
+{
+
+	assert(root->GetName() == "classobj");
+
+	int maxElements = 4;
+
+	// Add the elements of the table as tree children.
+
+	wxString result = "obj{";
+	wxString type;
+
+	wxXmlNode* node = root->GetChildren();
+
+	int numElements = 0;
+
+	while (node != NULL)
+	{
+
+		if (node->GetName() == "element")
+		{
+
+			wxXmlNode* keyNode = FindChildNode(node, "key");
+			wxXmlNode* dataNode = FindChildNode(node, "data");
+
+			if (keyNode != NULL && dataNode != NULL)
+			{
+
+				wxString key = GetNodeAsText(keyNode->GetChildren(), type);
+				wxString data = GetNodeAsText(dataNode->GetChildren(), type);
+
+				if (numElements >= maxElements)
+				{
+					result += "...";
+					break;
+				}
+
+				result += key + "=" + data + " ";
+				++numElements;
+
+			}
+
+		}
+
+		node = node->GetNext();
+
+	}
+
+	result += "}";
+
+	return result;
+
+}
+#endif
 
 wxString WatchCtrl::GetNodeAsText(wxXmlNode* node, wxString& type)
 {
@@ -487,6 +557,18 @@ wxString WatchCtrl::GetNodeAsText(wxXmlNode* node, wxString& type)
             type = "function";
 
         }
+#ifdef _KOOK_DECODA_
+		else if (node->GetName() == "class")
+		{
+			wxXmlNode* child = node->GetChildren();
+
+			while (child != NULL)
+			{
+				ReadXmlNode(child, "type", text);
+				child = child->GetNext();
+			}
+		}
+#endif
     }
     
     return text;

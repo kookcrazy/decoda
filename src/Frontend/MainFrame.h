@@ -249,6 +249,13 @@ public:
      */
     void OnProjectAddNewFile(wxCommandEvent& event);
 
+#ifdef _KOOK_DECODA_
+	/**
+	* Called when the user selects Project/Add Path from the menu.
+	*/
+	void OnProjectAddPath(wxCommandEvent& event);
+#endif
+
     /**
      * Called when the user selects Project/Settings from the menu.
      */
@@ -314,6 +321,10 @@ public:
     void OnUpdateDebugStepInto(wxUpdateUIEvent& event);
 
     void OnDebugStepOver(wxCommandEvent& event);
+
+#ifdef _KOOK_DECODA_
+	void OnDebugStepOut(wxCommandEvent& event);
+#endif
 
     void OnDebugQuickWatch(wxCommandEvent& event);
 
@@ -396,6 +407,12 @@ public:
      * Called when the user selects Window/Close from the menu.
      */
     void OnWindowClose(wxCommandEvent& event);
+
+#ifdef _KOOK_DECODA_
+	bool checkSaveFile(OpenFile* openFile);
+	void OnWindowCloseOther(wxCommandEvent& event);
+	void OnWindowCloseRight(wxCommandEvent& event);
+#endif
 
     /**
      * Called when the user selects Help/About from the menu.
@@ -1116,6 +1133,11 @@ private:
      */
     void CloseDocument(int pageIndex, bool promptForSave = true);
 
+#ifdef _KOOK_DECODA_
+	void CloseDocumentOther(int pageIndex);
+	void CloseDocumentRight(int pageIndex);
+#endif
+
     /**
      * Saves all of the open files that need to be saved.
      */
@@ -1170,6 +1192,12 @@ private:
      */
     void FindInFiles(const wxString& text, const wxArrayString& fileNames,
         bool matchCase, bool matchWholeWord, const wxString& baseDirectory);
+
+#ifdef _KOOK_DECODA_
+	void FindInProject(const wxString& text, const wxArrayString& fileTypes, bool matchCase, bool matchWholeWord);
+	unsigned int FindInProjectFile(const wxString& text, const wxArrayString& fileTypes, bool matchCase, bool matchWholeWord, const Project::File* file);
+	unsigned int FindInProjectPath(const wxString& text, const wxArrayString& fileTypes, bool matchCase, bool matchWholeWord, const Project::Path* path, unsigned int &numMatchFiles, unsigned int &numFiles);
+#endif
 
     /**
      * Searches a line for a particular piece of text. The comparision is case
@@ -1315,6 +1343,10 @@ private:
      */
     void UpdateForNewFile(Project::File* file);
 
+#ifdef _KOOK_DECODA_
+	void UpdateForNewPath(Project::Path* path);
+#endif
+
     /**
      * Updates the line mapper for the specified page. If the line mapper is
      * up-to-date this method does nothing.
@@ -1341,6 +1373,10 @@ private:
      * Removes the specified page from m_tabOrder and decrement all page indices greater than pageIndex.
      */
     void RemovePageFromTabOrder(int pageIndex);
+
+#ifdef _KOOK_DECODA_
+	void RemovePageFromTabOrder(int pageIndex, int type);
+#endif
         
 private:
 
@@ -1449,6 +1485,13 @@ private:
         ID_FirstExternalTool                = 1000,
         ID_FirstRecentFile                  = 2000,
         ID_FirstRecentProjectFile           = 3000,
+
+#ifdef _KOOK_DECODA_
+		ID_ProjectAddPath					= 88,
+		ID_NotebookTabCloseOther			= 89,
+		ID_NotebookTabCloseRight			= 90,
+		ID_DebugStepOut						= 91,
+#endif
     };
 
     static const wxString           s_scriptExtensions;
@@ -1464,6 +1507,9 @@ private:
     std::vector<OpenFile*>          m_openFiles;
     SymbolParser*                   m_symbolParser;
     bool                            m_waitForFinalSymbolParse; //For batch loading files more efficiently 
+#ifdef _KOOK_DECODA_
+	bool							m_inSettingProject;
+#endif
     
     wxAuiManager                    m_mgr;
     wxString                        m_modeLayout[Mode_NumModes];

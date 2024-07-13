@@ -126,7 +126,12 @@ void Channel::Destroy()
     }
 
 }
-
+#ifdef _KOOK_DECODA_
+bool Channel::IsValid()
+{
+	return m_pipe != INVALID_HANDLE_VALUE;
+}
+#endif
 bool Channel::Write(const void* buffer, unsigned int length)
 {
 

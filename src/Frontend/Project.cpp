@@ -60,6 +60,27 @@ wxString Project::File::GetFileType() const
     }
 }
 
+#ifdef _KOOK_DECODA_
+wxString Project::Path::GetDisplayName() const
+{
+	return pathName.AfterLast('\\');
+}
+
+void ClearPath(Project::Path* path)
+{
+	for (unsigned int i = 0; i < path->paths.size(); ++i)
+	{
+		ClearPath(path->paths[i]);
+	}
+	ClearVector(path->paths);
+	for (unsigned int i = 0; i < path->files.size(); ++i)
+	{
+		ClearVector(path->files[i]->symbols);
+	}
+	ClearVector(path->files);
+}
+#endif
+
 Project::Project()
 {
     m_needsSave     = false;
@@ -77,6 +98,16 @@ Project::~Project()
     
     ClearVector(m_files);
 
+#ifdef _KOOK_DECODA_
+	for (unsigned int i = 0; i < m_paths.size(); ++i)
+	{
+		ClearPath(m_paths[i]);
+	}
+	ClearVector(m_paths);
+
+	m_userfiles.clear();
+	m_fileMap.clear();
+#endif
 }
 
 wxString Project::GetName() const
@@ -157,10 +188,31 @@ bool Project::Load(const wxString& fileName)
 
     m_fileName  = fileName;
     m_needsSave = false;
+#ifdef _KOOK_DECODA_
+	m_needsUserSave = false;
+#endif
 
     return true;
 
 }
+
+#ifdef _KOOK_DECODA_
+bool Project::SaveUserSettings()
+{
+	if (!m_needsUserSave)
+		return false;
+
+	wxFileName userFileName(m_fileName);
+	userFileName.SetExt("deuser");
+
+	if (SaveUserSettings(userFileName.GetFullPath())) {
+		m_needsUserSave = false;
+		return true;
+	}
+
+	return false;
+}
+#endif
 
 const wxString& Project::GetFileName() const
 {
@@ -283,7 +335,12 @@ const Project::File* Project::GetFile(unsigned int fileIndex) const
 
 Project::File* Project::GetFileById(unsigned int fileId)
 {
-
+#ifdef _KOOK_DECODA_
+	for (FILEMAP::iterator it = m_fileMap.begin(); it != m_fileMap.end(); ++it) {
+		if (it->second->fileId == fileId)
+			return it->second;
+	}
+#else
     for (unsigned int fileIndex = 0; fileIndex < m_files.size(); ++fileIndex)
     {
         if (m_files[fileIndex]->fileId == fileId)
@@ -291,7 +348,7 @@ Project::File* Project::GetFileById(unsigned int fileId)
             return m_files[fileIndex];
         }
     }
-
+#endif
     return NULL;
 
 }
@@ -305,7 +362,13 @@ Project::File* Project::AddFile(const wxString& fileName)
 {
 
     // Check if the file is already in the project.
-
+#ifdef _KOOK_DECODA_
+	FILEMAP::iterator it = m_fileMap.find(fileName.Lower());
+	if (it != m_fileMap.end()) {
+		if (!it->second->temporary)
+			return NULL;
+	}
+#else
     for (unsigned int i = 0; i < m_files.size(); ++i)
     {
         if (!m_files[i]->temporary && m_files[i]->fileName.SameAs(fileName))
@@ -313,6 +376,7 @@ Project::File* Project::AddFile(const wxString& fileName)
             return NULL;
         }
     }
+#endif
 
     File* file = new File;
 
@@ -322,6 +386,11 @@ Project::File* Project::AddFile(const wxString& fileName)
     file->fileName      = fileName;
     file->status        = Status_None;
     file->fileId        = ++s_lastFileId;
+#ifdef _KOOK_DECODA_
+	file->path			= NULL;
+	file->opened		= false;
+	file->used			= false;
+#endif
 
     if (fileName.IsEmpty())
     {
@@ -330,6 +399,10 @@ Project::File* Project::AddFile(const wxString& fileName)
 
     m_files.push_back(file);
     m_needsSave = true;
+
+#ifdef _KOOK_DECODA_
+	m_fileMap.emplace(fileName.Lower(), file);
+#endif
     
     return file;
 
@@ -341,16 +414,51 @@ Project::File* Project::AddTemporaryFile(unsigned int scriptIndex)
     const DebugFrontend::Script* script = DebugFrontend::Get().GetScript(scriptIndex);
     assert(script != NULL);
 
+#ifdef _KOOK_DECODA_
+	wxFileName fileName = script->filename.c_str();
+	if (fileName.IsOk()) {
+		if (!fileName.IsAbsolute())
+			fileName.MakeAbsolute(m_workingDirectory);
+
+		FILEMAP::iterator it = m_fileMap.find(fileName.GetFullPath().Lower());
+		if (it != m_fileMap.end()) {
+			File* file = it->second;
+			if (file->scriptIndex == -1) {
+				CheckAddUserFile(file);
+				file->scriptIndex = scriptIndex;
+				return file;
+			}
+		}
+	}
+#endif
+
     File* file = new File;
 
     file->state         = script->state;
     file->scriptIndex   = scriptIndex;
     file->temporary     = true;
-    file->fileName      = script->name.c_str();
+#ifdef _KOOK_DECODA_
+	file->fileName		= fileName;
+#else
+    file->fileName      = script->filename.c_str();
+#endif
     file->status        = Status_None;
     file->fileId        = ++s_lastFileId;
+#ifdef _KOOK_DECODA_
+	file->path			= NULL;
+	file->opened		= false;
+#endif
 
     m_files.push_back(file);
+
+#ifdef _KOOK_DECODA_
+	if (fileName.IsOk() && fileName.IsAbsolute())
+	{
+		m_fileMap.emplace(fileName.GetFullPath().Lower(), file);
+	}
+	file->used = true;
+	m_userfiles.push_back(file);
+#endif
 
     return file;
 
@@ -367,6 +475,11 @@ Project::File* Project::AddTemporaryFile(const wxString& fileName)
     file->fileName      = fileName;
     file->status        = Status_None;
     file->fileId        = ++s_lastFileId;
+#ifdef _KOOK_DECODA_
+	file->path			= NULL;
+	file->opened		= false;
+	file->used			= false;
+#endif
 
     if (fileName.IsEmpty())
     {
@@ -400,23 +513,259 @@ void Project::RemoveFile(File* file)
     }
     
     ClearVector(file->symbols);
+
+#ifdef _KOOK_DECODA_
+	iterator = m_userfiles.begin();
+	while (iterator != m_userfiles.end())
+	{
+		if (file == *iterator) {
+			m_userfiles.erase(iterator);
+			break;
+		}
+		++iterator;
+	}
+#endif
+
     delete file;
 
 }
 
+#ifdef _KOOK_DECODA_
+Project::Path* Project::GetPath(unsigned int fileIndex)
+{
+	return m_paths[fileIndex];
+}
+
+const Project::Path* Project::GetPath(unsigned int fileIndex) const
+{
+	return m_paths[fileIndex];
+}
+
+unsigned int Project::GetNumPaths() const
+{
+	return m_paths.size();
+}
+
+void Project::AddFiles2Path(const wxString& pathName, Project::Path* path)
+{
+	WIN32_FIND_DATA data;
+	wxString findstr = pathName + "\\*.";
+	HANDLE handle = FindFirstFile(findstr, &data);
+	if (handle == NULL)
+		return;
+
+	Path* newpath;
+	do {
+		if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+			if (strcmp(data.cFileName, ".") != 0 && strcmp(data.cFileName, "..") != 0) {
+				newpath = new Path;
+				newpath->pathName = pathName + "\\" + data.cFileName;
+				newpath->status = PathStatus_None;
+
+				path->paths.push_back(newpath);
+
+				AddFiles2Path(newpath->pathName, newpath);
+			}
+		}
+	} while (FindNextFile(handle, &data));
+	FindClose(handle);
+
+	findstr = pathName  + "\\*.lua";
+	handle = FindFirstFile(findstr, &data);
+	if (handle == NULL)
+		return;
+	
+	File* newfile;
+	FILEMAP::iterator it;
+	wxString fileName;
+	do {
+		if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != FILE_ATTRIBUTE_DIRECTORY) {
+			fileName = pathName + "\\" + data.cFileName;
+
+			it = m_fileMap.find(fileName.Lower());
+			if (it != m_fileMap.end()) {
+				newfile = it->second;
+				newfile->temporary = false;
+
+				for (std::vector<File*>::iterator it2 = m_files.begin(); it2 != m_files.end(); ++it2) {
+					if (*it2 == newfile) {
+						m_files.erase(it2);
+						break;
+					}
+				}
+			}
+			else {
+				newfile = new File;
+				newfile->fileName = fileName;
+				newfile->state = CodeState_Normal;
+				newfile->scriptIndex = -1;
+				newfile->temporary = false;
+				newfile->status = Status_None;
+				newfile->fileId = ++s_lastFileId;
+				newfile->path = path;
+				newfile->opened = false;
+				newfile->used = false;
+
+				m_fileMap.emplace(fileName.Lower(), newfile);
+			}
+
+			path->files.push_back(newfile);
+		}
+	} while (FindNextFile(handle, &data));
+	FindClose(handle);
+}
+
+Project::Path* Project::AddPath(const wxString& pathName)
+{
+	for (unsigned int i = 0; i < m_paths.size(); ++i)
+	{
+		if (m_paths[i]->pathName == pathName)
+		{
+			return NULL;
+		}
+	}
+
+	Path* path = new Path;
+	path->pathName = pathName;
+	path->status = PathStatus_None;
+
+	m_paths.push_back(path);
+	m_needsSave = true;
+
+	AddFiles2Path(pathName, path);
+
+	return path;
+}
+
+unsigned int Project::GetNumUserFiles() const
+{
+	return m_userfiles.size();
+}
+
+Project::File* Project::GetUserFile(unsigned int fileIndex)
+{
+	return m_userfiles[fileIndex];
+}
+
+const Project::File* Project::GetUserFile(unsigned int fileIndex) const
+{
+	return m_userfiles[fileIndex];
+}
+
+void Project::setFileScriptIndex(Project::File* file, unsigned scriptIndex)
+{
+	CheckAddUserFile(file);
+	file->scriptIndex = scriptIndex;
+}
+
+void Project::OpenFile(Project::File* file)
+{
+	if (file->opened)
+		return;
+	CheckAddUserFile(file);
+	file->opened = true;
+	m_needsUserSave = true;
+}
+
+void Project::CloseFile(Project::File* file)
+{
+	if (!file->opened)
+		return;
+	file->opened = false;
+	CheckDelUserFile(file);
+
+	if (m_curOpenFileName == file->fileName.GetFullPath().Lower())
+		m_curOpenFileName.Clear();
+	m_needsUserSave = true;
+}
+
+Project::File* Project::GetCurFile()
+{
+	if (m_curOpenFileName.IsEmpty())
+		return NULL;
+
+	FILEMAP::iterator it = m_fileMap.find(m_curOpenFileName);
+	if (it == m_fileMap.end()) {
+		m_curOpenFileName.Clear();
+		return NULL;
+	}
+
+	return it->second;
+}
+
+void Project::SetCurFile(Project::File* file)
+{
+	if (file == NULL) {
+		if (m_curOpenFileName.IsEmpty())
+			return;
+		m_curOpenFileName.Clear();
+		m_needsUserSave = true;
+		return;
+	}
+
+	wxString filename = file->fileName.GetFullPath().Lower();
+	if (filename == m_curOpenFileName)
+		return;
+
+	m_curOpenFileName = filename;
+	m_needsUserSave = true;
+}
+
+void Project::CheckAddUserFile(File* file)
+{
+	if (file->path && !file->used) {
+		m_userfiles.push_back(file);
+		m_needsUserSave = true;
+		file->used = true;
+	}
+}
+
+void Project::CheckDelUserFile(File* file)
+{
+	if (file->path && !file->used) {
+		std::remove(m_userfiles.begin(), m_userfiles.end(), file);
+		m_needsUserSave = true;
+		file->used = false;
+	}
+}
+
+Project::File* Project::FildFile(const wxString& fileName)
+{
+	FILEMAP::iterator it = m_fileMap.find(fileName);
+	if (it != m_fileMap.end()) {
+		return it->second;
+	}
+
+	return NULL;
+}
+#endif
+
 void Project::CleanUpAfterSession()
 {
-
+#ifdef _KOOK_DECODA_
+	for (unsigned int i = 0; i < m_userfiles.size(); ++i)
+	{
+		m_userfiles[i]->scriptIndex = -1;
+	}
+#else
     for (unsigned int i = 0; i < m_files.size(); ++i)
     {
         m_files[i]->scriptIndex = -1;
     }
-
+#endif
 }
 
 Project::File* Project::GetFileForScript(unsigned int scriptIndex) const
 {
-
+#ifdef _KOOK_DECODA_
+	for (unsigned int i = 0; i < m_userfiles.size(); ++i)
+	{
+		if (m_userfiles[i]->scriptIndex == scriptIndex)
+		{
+			return m_userfiles[i];
+		}
+	}
+#else
     for (unsigned int i = 0; i < m_files.size(); ++i)
     {
         if (m_files[i]->scriptIndex == scriptIndex)
@@ -424,14 +773,19 @@ Project::File* Project::GetFileForScript(unsigned int scriptIndex) const
             return m_files[i];
         }
     }
-
+#endif
     return NULL;
 
 }
 
 Project::File* Project::GetFileForFileName(const wxFileName& fileName) const
 {
-
+#ifdef _KOOK_DECODA_
+	FILEMAP::const_iterator it = m_fileMap.find(fileName.GetFullPath().Lower());
+	if (it != m_fileMap.end()) {
+		return it->second;
+	}
+#else
     for (unsigned int i = 0; i < m_files.size(); ++i)
     {
         if (m_files[i]->fileName.GetFullName().CmpNoCase(fileName.GetFullName()) == 0)
@@ -439,14 +793,50 @@ Project::File* Project::GetFileForFileName(const wxFileName& fileName) const
             return m_files[i];
         }
     }
-
+#endif
     return NULL;
 
 }
 
 void Project::SetBreakpoint(unsigned int scriptIndex, unsigned int line, bool set)
 {
+#ifdef _KOOK_DECODA_
+	File* file;
+	for (unsigned int i = 0; i < m_userfiles.size(); ++i)
+	{
+		file = m_userfiles[i];
+        if (file->scriptIndex == scriptIndex)
+        {
 
+            std::vector<unsigned int>::iterator iterator;
+            iterator = std::find(file->breakpoints.begin(), file->breakpoints.end(), line);
+
+            if (set)
+            {
+                if (iterator == file->breakpoints.end())
+                {
+					file->breakpoints.push_back(line);
+                    if (!file->temporary)
+                    {
+                        m_needsUserSave = true;
+                    }
+                }
+            }
+            else
+            {
+                if (iterator != file->breakpoints.end())
+                {
+					file->breakpoints.erase(iterator);
+                    if (!file->temporary)
+                    {
+                        m_needsUserSave = true;
+                    }
+                }
+            }
+
+        }
+    }
+#else
     for (unsigned int i = 0; i < m_files.size(); ++i)
     {
         if (m_files[i]->scriptIndex == scriptIndex)
@@ -480,12 +870,37 @@ void Project::SetBreakpoint(unsigned int scriptIndex, unsigned int line, bool se
 
         }
     }
-
+#endif
 }
 
 bool Project::ToggleBreakpoint(File* file, unsigned int line)
 {
-
+#ifdef _KOOK_DECODA_
+	bool set = false;
+	bool found = false;
+	std::vector<unsigned int>::iterator iterator;
+	for (iterator = file->breakpoints.begin(); iterator != file->breakpoints.end(); iterator++) {
+		if (*iterator == line) {
+			file->breakpoints.erase(iterator);
+			set = false;
+			CheckDelUserFile(file);
+			found = true;
+			break;
+		}
+		if (line < *iterator) {
+			CheckAddUserFile(file);
+			file->breakpoints.insert(iterator, line);
+			set = true;
+			found = true;
+			break;
+		}
+	}
+	if (!found) {
+		CheckAddUserFile(file);
+		file->breakpoints.push_back(line);
+		set = true;
+	}
+#else
     std::vector<unsigned int>::iterator iterator;
     iterator = std::find(file->breakpoints.begin(), file->breakpoints.end(), line);
 
@@ -500,7 +915,8 @@ bool Project::ToggleBreakpoint(File* file, unsigned int line)
     {
         file->breakpoints.erase(iterator);
         set = false;
-    }
+	}
+#endif
 
     if (!file->temporary)
     {
@@ -566,6 +982,20 @@ wxXmlNode* Project::SaveUserFileNode(const wxString& baseDirectory, const File* 
         }
 
     }
+#ifdef _KOOK_DECODA_
+	if (file->opened)
+	{
+		if (fileNode == NULL) {
+			wxFileName fileName = file->fileName;
+			fileName.MakeRelativeTo(baseDirectory);
+
+			fileNode = new wxXmlNode(wxXML_ELEMENT_NODE, "file");
+			fileNode->AddChild(WriteXmlNode("filename", fileName.GetFullPath()));
+		}
+
+		fileNode->AddChild(WriteXmlNodeBool("opened", true));
+	}
+#endif
 
     return fileNode;
 
@@ -591,6 +1021,159 @@ bool Project::LoadUserFilesNode(const wxString& baseDirectory, wxXmlNode* root)
 
 }
 
+#ifdef _KOOK_DECODA_
+void Project::SetPathStatus(Path* path, PathStatus status)
+{
+	if (path->status == status)
+		return;
+	path->status = status;
+	m_needsUserSave = true;
+}
+
+wxXmlNode* Project::SavePathNode(const wxString& baseDirectory, const Path* path)
+{
+	wxXmlNode* node = new wxXmlNode(wxXML_ELEMENT_NODE, "path");
+	node->AddChild(WriteXmlNode("pathname", path->pathName));
+	node->AddChild(WriteXmlNode("status", (unsigned int)path->status));
+
+	return node;
+}
+
+bool Project::LoadPathNode(const wxString& baseDirectory, wxXmlNode* node)
+{
+	if (node->GetName() != "path")
+	{
+		return false;
+	}
+
+	Path* path = new Path;
+	path->status = PathStatus_None;
+
+	wxXmlNode* child = node->GetChildren();
+	wxString pathName;
+
+	while (child != NULL)
+	{
+		if (ReadXmlNode(child, "pathname", pathName))
+		{
+			path->pathName = pathName;
+		}
+		child = child->GetNext();
+	}
+
+	m_paths.push_back(path);
+
+	AddFiles2Path(pathName, path);
+	return true;
+
+}
+
+wxXmlNode* Project::SaveUserPathNode(const wxString& baseDirectory, const Path* path) const
+{
+
+	wxXmlNode* pathNode = NULL;
+
+	if (path->status != PathStatus_None)
+	{
+		pathNode = new wxXmlNode(wxXML_ELEMENT_NODE, "path");
+		pathNode->AddChild(WriteXmlNode("pathname", path->pathName));
+		pathNode->AddChild(WriteXmlNode("status", (unsigned int)path->status));
+	}
+
+	for (unsigned int i = 0; i < path->paths.size(); ++i) {
+		wxXmlNode* subnode = SaveUserPathNode(baseDirectory, path->paths[i]);
+		if (subnode) {
+			if (pathNode == NULL) {
+				pathNode = new wxXmlNode(wxXML_ELEMENT_NODE, "path");
+				pathNode->AddChild(WriteXmlNode("pathname", path->pathName));
+			}
+			pathNode->AddChild(subnode);
+		}
+	}
+
+	return pathNode;
+
+}
+
+bool Project::LoadUserPathNode(const wxString& baseDirectory, wxXmlNode* root, Path* parent)
+{
+	if (root->GetName() != "path")
+	{
+		return false;
+	}
+
+	wxString pathName;
+	unsigned int status;
+	wxXmlNode* node = root->GetChildren();
+
+	Path* path = NULL;
+	while (node != NULL)
+	{
+		if (path == NULL) {
+			if (ReadXmlNode(node, wxT("pathname"), pathName))
+			{
+				if (parent == NULL) {
+					for (unsigned int i = 0; i < m_paths.size(); ++i) {
+						if (m_paths[i]->pathName == pathName) {
+							path = m_paths[i];
+							break;
+						}
+					}
+				}
+				else {
+					for (unsigned int i = 0; i < parent->paths.size(); ++i) {
+						if (parent->paths[i]->pathName == pathName) {
+							path = parent->paths[i];
+							break;
+						}
+					}
+				}
+			}
+			if (path)
+				node = root->GetChildren();
+			else
+				node = node->GetNext();
+			continue;
+		}
+
+		if (ReadXmlNode(node, wxT("status"), status))
+		{
+			path->status = (PathStatus)status;
+		}
+		else
+			LoadUserPathNode(baseDirectory, node, path);
+
+		node = node->GetNext();
+	}
+
+	if (path == NULL)
+		return false;
+
+	return true;
+
+}
+
+bool Project::LoadUserPathsNode(const wxString& baseDirectory, wxXmlNode* root)
+{
+
+	if (root->GetName() != "paths")
+	{
+		return false;
+	}
+
+	wxXmlNode* node = root->GetChildren();
+
+	while (node != NULL)
+	{
+		LoadUserPathNode(baseDirectory, node);
+		node = node->GetNext();
+	}
+
+	return true;
+
+}
+#endif
+
 bool Project::LoadUserFileNode(const wxString& baseDirectory, wxXmlNode* root)
 {
     
@@ -603,11 +1186,17 @@ bool Project::LoadUserFileNode(const wxString& baseDirectory, wxXmlNode* root)
     std::vector<unsigned int> breakpoints;
 
     wxXmlNode* node = root->GetChildren();
+#ifdef _KOOK_DECODA_
+	bool opened = false;
+#endif
 
     while (node != NULL)
     {
 
         ReadXmlNode(node, wxT("filename"), fileName)
+#ifdef _KOOK_DECODA_
+		|| ReadXmlNode(node, wxT("opened"), opened)
+#endif
         || LoadBreakpointNode(node, breakpoints);
 
         node = node->GetNext();
@@ -625,6 +1214,12 @@ bool Project::LoadUserFileNode(const wxString& baseDirectory, wxXmlNode* root)
 
         Project::File* file = NULL;
 
+#ifdef _KOOK_DECODA_
+		FILEMAP::iterator it = m_fileMap.find(temp.GetFullPath().Lower());
+		if (it != m_fileMap.end()) {
+			file = it->second;
+		}
+#else
         for (unsigned int fileIndex = 0; fileIndex < m_files.size(); ++fileIndex)
         {
             if (m_files[fileIndex]->fileName == temp)
@@ -633,10 +1228,20 @@ bool Project::LoadUserFileNode(const wxString& baseDirectory, wxXmlNode* root)
                 break;
             }
         }
+#endif
 
         if (file != NULL)
         {
             file->breakpoints = breakpoints;
+#ifdef _KOOK_DECODA_
+			std::sort(file->breakpoints.begin(), file->breakpoints.end());
+			file->opened = opened;
+
+			if (!file->used) {
+				file->used = true;
+				m_userfiles.push_back(file);
+			}
+#endif
         }
 
     }
@@ -688,6 +1293,11 @@ bool Project::LoadFileNode(const wxString& baseDirectory, wxXmlNode* node)
     file->temporary     = false;
     file->status        = Status_None;
     file->fileId        = ++s_lastFileId;
+#ifdef _KOOK_DECODA_
+	file->path			= NULL;
+	file->opened		= false;
+	file->used			= false;
+#endif
 
     wxXmlNode* child = node->GetChildren();
     wxString fileName;
@@ -765,6 +1375,19 @@ bool Project::SaveGeneralSettings(const wxString& fileName)
         }
     }
 
+#ifdef _KOOK_DECODA_
+	for (unsigned int pathIndex = 0; pathIndex < m_paths.size(); ++pathIndex)
+	{
+		const Path* path = m_paths[pathIndex];
+		wxXmlNode* node = new wxXmlNode(wxXML_ELEMENT_NODE, path->GetDisplayName());
+		if (node != NULL)
+		{
+			wxXmlNode* node = SavePathNode(baseDirectory, path);
+			root->AddChild(node);
+		}
+	}
+#endif
+
     return document.Save(fileName);
 
 }
@@ -786,6 +1409,10 @@ bool Project::SaveUserSettings(const wxString& fileName)
     root->AddChild(WriteXmlNode("symbols_directory",    m_symbolsDirectory));
 #endif
     root->AddChild(WriteXmlNode("command_arguments",    m_commandArguments));
+#ifdef _KOOK_DECODA_
+	if (!m_curOpenFileName.IsEmpty())
+		root->AddChild(WriteXmlNode("cur_file", m_curOpenFileName));
+#endif
 
     // Add the source control settings.
     
@@ -801,11 +1428,40 @@ bool Project::SaveUserSettings(const wxString& fileName)
 
     wxString baseDirectory = wxFileName(fileName).GetPath();
 
+#ifdef _KOOK_DECODA_
+	wxXmlNode* pathsNode = NULL;
+
+	for (unsigned int pathIndex = 0; pathIndex < m_paths.size(); ++pathIndex)
+	{
+		const Path* path = m_paths[pathIndex];
+		wxXmlNode* node = SaveUserPathNode(baseDirectory, path);
+		if (node != NULL)
+		{
+			if (pathsNode == NULL)
+			{
+				pathsNode = new wxXmlNode(wxXML_ELEMENT_NODE, "paths");
+			}
+			pathsNode->AddChild(node);
+		}
+	}
+
+	if (pathsNode != NULL)
+	{
+		root->AddChild(pathsNode);
+	}
+#endif
+
     wxXmlNode* filesNode = NULL;
 
-    for (unsigned int fileIndex = 0; fileIndex < m_files.size(); ++fileIndex)
+#ifdef _KOOK_DECODA_
+    for (unsigned int fileIndex = 0; fileIndex < m_userfiles.size(); ++fileIndex)
     {
-        const File* file = m_files[fileIndex];
+        const File* file = m_userfiles[fileIndex];
+#else
+	for (unsigned int fileIndex = 0; fileIndex < m_files.size(); ++fileIndex)
+	{
+		const File* file = m_files[fileIndex];
+#endif
         wxXmlNode* node = SaveUserFileNode(baseDirectory, file);
         if (node != NULL)
         {
@@ -860,7 +1516,13 @@ bool Project::LoadUserSettings(const wxString& fileName)
         || ReadXmlNode(node, "symbols_directory",   m_symbolsDirectory)
 #endif
         || LoadSccNode(node)
-        || LoadUserFilesNode(baseDirectory, node);
+#ifdef _KOOK_DECODA_
+        || LoadUserFilesNode(baseDirectory, node)
+		|| ReadXmlNode(node, "cur_file", m_curOpenFileName)
+		|| LoadUserPathsNode(baseDirectory, node);
+#else
+		|| LoadUserFilesNode(baseDirectory, node);
+#endif
         
         node = node->GetNext();
 
@@ -896,7 +1558,12 @@ bool Project::LoadGeneralSettings(const wxString& fileName)
     
     while (node != NULL)
     {
+#ifdef _KOOK_DECODA_
+		LoadFileNode(baseDirectory, node)
+		|| LoadPathNode(baseDirectory, node)
+#else
         LoadFileNode(baseDirectory, node);
+#endif
         node = node->GetNext();
     }
 

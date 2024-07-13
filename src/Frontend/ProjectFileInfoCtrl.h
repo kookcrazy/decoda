@@ -60,6 +60,10 @@ public:
      */
     void SetFile(const Project::File* file);
 
+#ifdef _KOOK_DECODA_
+	void SetPath(const Project::Path* path);
+#endif
+
     /**
      * Returns the file which the info in the box refers to.
      */
@@ -79,6 +83,9 @@ private:
     static const int        s_padding = 3;
     
     const Project::File*    m_file;
+#ifdef _KOOK_DECODA_
+	const Project::Path*    m_path;
+#endif
     bool                    m_textIsClipped;
 
 };

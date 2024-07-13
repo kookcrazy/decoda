@@ -525,7 +525,11 @@ void DebugFrontend::EventThreadProc()
             // If the debuggee does wacky things when it specifies the file name
             // we need to correct for that or it can make trying to access the
             // file bad.
+#ifdef _KOOK_DECODA_
+            script->filename = MakeValidFileName(script->name);
+#else
             script->name = MakeValidFileName(script->name);
+#endif
 
             unsigned int scriptIndex = m_scripts.size();
             m_scripts.push_back(script);
@@ -692,6 +696,16 @@ void DebugFrontend::StepOver(unsigned int vm)
     m_commandChannel.Flush();
 }
 
+#ifdef _KOOK_DECODA_
+void DebugFrontend::StepOut(unsigned int vm)
+{
+	m_state = State_Running;
+	m_commandChannel.WriteUInt32(CommandId_StepOut);
+	m_commandChannel.WriteUInt32(vm);
+	m_commandChannel.Flush();
+}
+#endif
+
 void DebugFrontend::StepInto(unsigned int vm)
 {
     m_state = State_Running;
@@ -742,6 +756,10 @@ void DebugFrontend::ToggleBreakpoint(unsigned int vm, unsigned int scriptIndex, 
 
 void DebugFrontend::RemoveAllBreakPoints(unsigned int vm)
 {
+#ifdef _KOOK_DECODA_
+	if (!m_commandChannel.IsValid())
+		return;
+#endif
 
     m_commandChannel.WriteUInt32(CommandId_DeleteAllBreakpoints);
     m_commandChannel.WriteUInt32(0);
@@ -859,6 +877,14 @@ std::string DebugFrontend::MakeValidFileName(const std::string& name)
                 continue;
             }
         }
+
+#ifdef _KOOK_DECODA_
+		if (name[i] == '\\' && name[i + 1] == '.' && name[i + 2] == '.') {
+			i+=2;
+			result.resize(result.find_last_of('\\'));
+		}
+		else
+#endif
 
         result += name[i];
 

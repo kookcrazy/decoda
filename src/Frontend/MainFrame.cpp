@@ -133,6 +133,9 @@ BEGIN_EVENT_TABLE(MainFrame, wxFrame)
     // Project menu events.
     EVT_MENU(ID_ProjectAddExistingFile,             MainFrame::OnProjectAddExistingFile)
     EVT_MENU(ID_ProjectAddNewFile,                  MainFrame::OnProjectAddNewFile)
+#ifdef _KOOK_DECODA_
+	EVT_MENU(ID_ProjectAddPath,						MainFrame::OnProjectAddPath)
+#endif
     EVT_MENU(ID_ProjectSettings,                    MainFrame::OnProjectSettings)
     EVT_MENU(ID_FileNewProject,                     MainFrame::OnFileNewProject)
     EVT_UPDATE_UI(ID_FileNewProject,                MainFrame::EnableWhenInactive)
@@ -169,6 +172,10 @@ BEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_UPDATE_UI(ID_DebugStepInto,                 MainFrame::OnUpdateDebugStepInto)
     EVT_MENU(ID_DebugStepOver,                      MainFrame::OnDebugStepOver)
     EVT_UPDATE_UI(ID_DebugStepOver,                 MainFrame::EnableWhenBroken)
+#ifdef _KOOK_DECODA_
+	EVT_MENU(ID_DebugStepOut,						MainFrame::OnDebugStepOut)
+	EVT_UPDATE_UI(ID_DebugStepOut,					MainFrame::EnableWhenBroken)
+#endif
     EVT_MENU(ID_DebugQuickWatch,                    MainFrame::OnDebugQuickWatch)
     EVT_UPDATE_UI(ID_DebugQuickWatch,               MainFrame::EnableWhenBroken)
     EVT_MENU(ID_DebugToggleBreakpoint,              MainFrame::OnDebugToggleBreakpoint)
@@ -212,6 +219,10 @@ BEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_UPDATE_UI(ID_NotebookTabShowHistory,        MainFrame::OnUpdateNotebookTabShowHistory)
     EVT_MENU(ID_NotebookTabSave,                    MainFrame::OnFileSave)
     EVT_MENU(ID_NotebookTabClose,                   MainFrame::OnWindowClose)
+#ifdef _KOOK_DECODA_
+	EVT_MENU(ID_NotebookTabCloseOther,				MainFrame::OnWindowCloseOther)
+	EVT_MENU(ID_NotebookTabCloseRight,				MainFrame::OnWindowCloseRight)
+#endif
     EVT_MENU(ID_NotebookTabShowFile,                MainFrame::OnFileShow)
 
     // Project explorer related events.
@@ -341,6 +352,9 @@ MainFrame::MainFrame(const wxString& title, int openFilesMessage, const wxPoint&
 {
 
     m_project = NULL;
+#ifdef _KOOK_DECODA_
+	m_inSettingProject = false;
+#endif
 
     Center();
     UpdateStartUpPlacement();
@@ -459,6 +473,10 @@ MainFrame::MainFrame(const wxString& title, int openFilesMessage, const wxPoint&
     
     m_notebookTabMenu->Append(ID_NotebookTabSave,           _("&Save"));
     m_notebookTabMenu->Append(ID_NotebookTabClose,          _("&Close"));
+#ifdef _KOOK_DECODA_
+	m_notebookTabMenu->Append(ID_NotebookTabCloseOther,		_("Close Other"));
+	m_notebookTabMenu->Append(ID_NotebookTabCloseRight,		_("Close Right"));
+#endif
     m_notebookTabMenu->Append(ID_NotebookTabShowFile,       _("Show in &Folder"));
     m_notebookTabMenu->AppendSeparator();
     m_notebookTabMenu->Append(ID_NotebookTabCheckOut,       _("Check &Out"));
@@ -555,8 +573,13 @@ MainFrame::~MainFrame()
 
 void MainFrame::OnClose(wxCloseEvent& event)
 {
+#ifdef _KOOK_DECODA_
+	m_inSettingProject = true;
 
+	if (SaveProjectIfNeeded() || !event.CanVeto())
+#else
     if ((CloseAllFiles() && SaveProjectIfNeeded()) || !event.CanVeto())
+#endif
     {
 
         // Detach the debugger if it's currently running. This will allow the application
@@ -569,7 +592,9 @@ void MainFrame::OnClose(wxCloseEvent& event)
         Destroy();
 
     }
-    
+#ifdef _KOOK_DECODA_
+	m_inSettingProject = false;
+#endif    
 }
 
 void MainFrame::InitializeMenu()
@@ -629,7 +654,11 @@ void MainFrame::InitializeMenu()
     menuProject->Append(ID_FileSaveProjectAs,           _("Save Project &As..."));
     menuProject->AppendSeparator();
     menuProject->Append(ID_ProjectAddNewFile,           _("Add Ne&w File..."));
-    menuProject->Append(ID_ProjectAddExistingFile,      _("Add Existin&g File..."));
+    menuProject->Append(ID_ProjectAddExistingFile,      _("Add Existin&g File..."));	
+#ifdef _KOOK_DECODA_
+	menuProject->AppendSeparator();
+	menuProject->Append(ID_ProjectAddPath,				_("Add &Folder to Project..."));
+#endif
     menuProject->AppendSeparator();
     menuProject->AppendSubMenu(menuRecentProjects,      _("&Recent Files..."));
     menuProject->AppendSeparator();
@@ -659,6 +688,9 @@ void MainFrame::InitializeMenu()
     menuDebug->AppendSeparator();
     menuDebug->Append(ID_DebugStepInto,                 _("Step &Into"));
     menuDebug->Append(ID_DebugStepOver,                 _("Step &Over"));
+#ifdef _KOOK_DECODA_
+	menuDebug->Append(ID_DebugStepOut,					_("Step O&ut"));
+#endif
     menuDebug->Append(ID_DebugQuickWatch,               _("&Quick Watch..."));
     menuDebug->AppendSeparator();
     menuDebug->Append(ID_DebugToggleBreakpoint,         _("To&ggle Breakpoint"),        _("Toggles a breakpoint on the current line"));
@@ -771,7 +803,9 @@ void MainFrame::NewProject()
 
 void MainFrame::SetProject(Project* project)
 {
-
+#ifdef _KOOK_DECODA_
+	m_inSettingProject = true;
+#endif
     CloseAllFiles();
 
     m_output->Clear();
@@ -797,6 +831,21 @@ void MainFrame::SetProject(Project* project)
 
     InitializeSourceControl();
 
+#ifdef _KOOK_DECODA_
+	Project::File* file;
+	for (unsigned int fileIndex = 0; fileIndex < project->GetNumUserFiles(); ++fileIndex)
+	{
+		file = project->GetUserFile(fileIndex);
+		if (file->opened)
+			OpenProjectFile(file);
+	}
+
+	file = m_project->GetCurFile();
+	if (file) {
+		OpenProjectFile(file);
+	}
+	m_inSettingProject = false;
+#endif
 }
 
 void MainFrame::OnFileSaveProject(wxCommandEvent& WXUNUSED(event))
@@ -1082,6 +1131,10 @@ void MainFrame::OnEditFindInFiles(wxCommandEvent& event)
         dialog.SetText(m_openFiles[pageIndex]->edit->GetSelectedText());
     }
 
+#ifdef _KOOK_DECODA_
+	bool findInProject = false;
+	wxArrayString fileTypesArray;
+#endif
     if (dialog.ShowModal() == wxID_OK)
     {
 
@@ -1098,7 +1151,9 @@ void MainFrame::OnEditFindInFiles(wxCommandEvent& event)
         // Multiple file types can be specified separated by ; characters, but we can only
         // search for one type at a time with wxWidgets, so separate them out.
 
+#ifndef _KOOK_DECODA_
         wxArrayString fileTypesArray;
+#endif
         unsigned int start = 0;
 
         while (start < caseFileTypes.Length())
@@ -1125,7 +1180,9 @@ void MainFrame::OnEditFindInFiles(wxCommandEvent& event)
 
         if (lookIn == "Current Project")
         {
-
+#ifdef _KOOK_DECODA_
+			findInProject = true;
+#else
             for (unsigned int i = 0; i < m_project->GetNumFiles(); ++i)
             {
 
@@ -1149,7 +1206,7 @@ void MainFrame::OnEditFindInFiles(wxCommandEvent& event)
             }
 
             baseDirectory = wxFileName(m_project->GetFileName()).GetPath();
-
+#endif
         }
         else
         {
@@ -1180,6 +1237,11 @@ void MainFrame::OnEditFindInFiles(wxCommandEvent& event)
 
         m_searchWindow->SearchMessage(wxString::Format("Find all \"%s\"", text.ToAscii()));
 
+#ifdef _KOOK_DECODA_
+		if (findInProject)
+			FindInProject(text, fileTypesArray, dialog.GetMatchCase(), dialog.GetMatchWholdWord());
+		else
+#endif
         FindInFiles(text, fileNames, dialog.GetMatchCase(), dialog.GetMatchWholdWord(), baseDirectory);
 
     }
@@ -1310,7 +1372,10 @@ void MainFrame::OnProjectAddNewFile(wxCommandEvent& WXUNUSED(event))
 
                 // Open the file in the editor.
                 OpenProjectFile(file);
-            
+#ifdef _KOOK_DECODA_
+				m_project->OpenFile(file);
+				m_project->SaveUserSettings();
+#endif
             }
             else
             {
@@ -1324,6 +1389,33 @@ void MainFrame::OnProjectAddNewFile(wxCommandEvent& WXUNUSED(event))
     }
 
 }
+
+#ifdef _KOOK_DECODA_
+void MainFrame::OnProjectAddPath(wxCommandEvent& WXUNUSED(event))
+{
+
+	wxFileDialog dialog(this, _("Add Folder"), "", "", "", wxFD_PATH | wxFD_MULTIPLE);
+
+	if (dialog.ShowModal() == wxID_OK)
+	{
+		wxArrayString fileNames;
+		dialog.GetPaths(fileNames);
+
+		for (unsigned int i = 0; i < fileNames.Count(); ++i)
+		{
+			Project::Path* path = m_project->AddPath(fileNames[i]);
+			if (path != NULL)
+			{
+				UpdateForNewPath(path);
+
+				// Update the status for the new files.
+				//UpdateProjectFileStatus(file);
+			}
+		}
+	}
+
+}
+#endif
 
 void MainFrame::OnProjectAddExistingFile(wxCommandEvent& WXUNUSED(event))
 {
@@ -1482,6 +1574,14 @@ void MainFrame::OnDebugStepOver(wxCommandEvent& WXUNUSED(event))
     DebugFrontend::Get().StepOver(m_vm);
     UpdateForNewState();
 }
+
+#ifdef _KOOK_DECODA_
+void MainFrame::OnDebugStepOut(wxCommandEvent& WXUNUSED(event))
+{
+	DebugFrontend::Get().StepOut(m_vm);
+	UpdateForNewState();
+}
+#endif
 
 void MainFrame::OnDebugQuickWatch(wxCommandEvent& WXUNUSED(event))
 {
@@ -1672,6 +1772,147 @@ void MainFrame::OnWindowClose(wxCommandEvent& WXUNUSED(event))
 
 }
 
+#ifdef _KOOK_DECODA_
+bool MainFrame::checkSaveFile(OpenFile* openFile)
+{
+	if (openFile->edit->GetModify())
+	{
+		Project::File* file = openFile->file;
+
+		wxString message;
+		message.Printf("Save changes to \'%s\'?", file->GetDisplayName());
+
+		int result = wxMessageBox(message, s_applicationName, wxYES_NO | wxCANCEL | wxICON_QUESTION, this);
+
+		if (result == wxCANCEL)
+		{
+			return false;
+		}
+		else if (result == wxYES)
+		{
+			if (!SaveFile(openFile, false))
+			{
+				return false;
+			}
+		}
+		else if (result == wxNO)
+		{
+
+		}
+
+	}
+	return true;
+}
+
+void MainFrame::OnWindowCloseOther(wxCommandEvent& WXUNUSED(event))
+{
+	if (m_notebook->GetPageCount() > 0)
+	{
+		const wxWindow* selection = m_notebook->GetPage(m_notebook->GetSelection());
+		OpenFile* of = NULL;
+		OpenFile* curfile = NULL;
+		Project::File* pfile = NULL;
+		CodeEdit* edit = NULL;
+		int page;
+
+		for (unsigned int i = m_openFiles.size(); i > 0; --i)
+		{
+			of = m_openFiles[i - 1];
+			if (of->edit == selection)
+				continue;
+			if (!checkSaveFile(of))
+				return;
+		}
+
+		for (unsigned int i = m_openFiles.size(); i > 0 ; --i)
+		{
+			of = m_openFiles[i - 1];
+			if (of->edit != selection) {
+				pfile = of->file;
+				edit = of->edit;
+
+				delete of;
+
+				if (pfile->temporary && pfile->scriptIndex == -1)
+				{
+					m_projectExplorer->RemoveFile(pfile);
+					m_project->RemoveFile(pfile);
+					m_breakpointsWindow->RemoveFile(pfile);
+				}
+				m_project->CloseFile(pfile);
+				
+				m_notebook->DeletePage(i - 1);
+			}
+			else {
+				page = i - 1;
+				curfile = of;
+			}	
+		}
+
+		m_project->SaveUserSettings();
+
+		m_openFiles.clear();
+		m_openFiles.push_back(curfile);
+
+		RemovePageFromTabOrder(page, 0);
+	}
+}
+
+void MainFrame::OnWindowCloseRight(wxCommandEvent& WXUNUSED(event))
+{
+
+	if (m_notebook->GetPageCount() > 0)
+	{
+		const wxWindow* selection = m_notebook->GetPage(m_notebook->GetSelection());
+		OpenFile* of = NULL;
+		OpenFile* curfile = NULL;
+		Project::File* pfile = NULL;
+		CodeEdit* edit = NULL;
+		int page;
+
+		for (unsigned int i = m_openFiles.size(); i > 0; --i)
+		{
+			of = m_openFiles[i - 1];
+			if (of->edit == selection)
+				break;
+			if (!checkSaveFile(of))
+				return;
+		}
+
+		for (unsigned int i = m_openFiles.size(); i > 0; --i)
+		{
+			of = m_openFiles[i - 1];
+			if (of->edit != selection) {
+				pfile = of->file;
+				edit = of->edit;
+				delete of;
+
+				if (pfile->temporary && pfile->scriptIndex == -1)
+				{
+					m_projectExplorer->RemoveFile(pfile);
+					m_project->RemoveFile(pfile);
+					m_breakpointsWindow->RemoveFile(pfile);
+				}
+				m_project->CloseFile(pfile);
+
+				m_notebook->DeletePage(i - 1);
+
+				m_openFiles.erase(m_openFiles.begin() + i - 1);
+			}
+			else {
+				page = i - 1;
+				curfile = of;
+				break;
+			}
+		}
+
+		m_project->SaveUserSettings();
+
+		RemovePageFromTabOrder(page, 1);
+	}
+}
+#endif
+
 void MainFrame::OnWindowCloseAllDocuments(wxCommandEvent& WXUNUSED(event))
 {
     CloseAllFiles();
@@ -1822,6 +2063,27 @@ void MainFrame::RemovePageFromTabOrder(int pageIndex)
 
 }
 
+#ifdef _KOOK_DECODA_
+void MainFrame::RemovePageFromTabOrder(int pageIndex, int type)
+{
+	switch (type) {
+	case 0: {//remove other
+		m_tabOrder.clear();
+		m_tabOrder.push_back(pageIndex);
+		break;
+	}
+	case 1: {
+		for (unsigned int i = m_tabOrder.size(); i > 0; --i) {
+			if (i - 1 == pageIndex)
+				return;
+			m_tabOrder.pop_back();
+		}
+		break;
+	}
+	}
+}
+#endif
+
 void MainFrame::OnDebugEvent(wxDebugEvent& event)
 {
 
@@ -1842,7 +2104,11 @@ void MainFrame::OnDebugEvent(wxDebugEvent& event)
             {
                 // Check to see if one of the existing files' contents match this script.
                 DebugFrontend::Script* script = DebugFrontend::Get().GetScript(scriptIndex);
+#ifdef _KOOK_DECODA_
+                file = GetFileMatchingSource( wxFileName(DebugFrontend::Get().GetScript(scriptIndex)->filename), script->source );
+#else
                 file = GetFileMatchingSource( wxFileName(DebugFrontend::Get().GetScript(scriptIndex)->name), script->source );
+#endif
             
                 if (file != NULL)
                 {
@@ -1881,7 +2147,11 @@ void MainFrame::OnDebugEvent(wxDebugEvent& event)
 
                 DebugFrontend::Script* script = DebugFrontend::Get().GetScript(scriptIndex);
                 
+#ifdef _KOOK_DECODA_
+				m_project->setFileScriptIndex(file, scriptIndex);
+#else
                 file->scriptIndex = scriptIndex;
+#endif
                 for (unsigned int i = 0; i < breakpoints.size(); ++i)
                 {
                     unsigned int newLine = breakpoints[i];
@@ -2130,7 +2400,20 @@ void MainFrame::OnNotebookPageChanged(wxAuiNotebookEvent& event)
         {
             m_openFiles[pageIndex]->edit->SetFocus();
         }
-    }    
+
+#ifdef _KOOK_DECODA_
+		if (!m_inSettingProject) {
+			m_project->SetCurFile(file->file);
+			m_project->SaveUserSettings();
+		}
+#endif
+    } 
+#ifdef _KOOK_DECODA_
+	else if (!m_inSettingProject) {
+		m_project->SetCurFile(NULL);
+		m_project->SaveUserSettings();
+	}
+#endif
     
     UpdateStatusBarLineAndColumn();
 
@@ -2993,11 +3276,37 @@ bool MainFrame::ParseErrorMessage(const wxString& error, wxString& fileName, uns
         // Check if the target stars with "...". Luac does this if the file name is too long.
         // In that case, we find the closest matching file in the project.
 
+#ifdef _KOOK_DECODA_
+		wxString partialName;
+		if (fileName.StartsWith(wxT("...")))
+			partialName = wxFileName(fileName.Mid(3)).GetFullPath();
+		else if (m_project && fileName.StartsWith(wxT("..")))
+		{
+			int scriptIndex = DebugFrontend::Get().GetScriptIndex(fileName);
+			if (scriptIndex < 0)
+				return false;
+
+			const Project::File* file = m_project->GetFileForScript(scriptIndex);
+			if (file)
+			{
+				fileName = file->fileName.GetFullPath();
+				return true;
+			}
+
+			return false;
+		}
+
+        if (!partialName.IsEmpty())
+#else
         if ( fileName.StartsWith(wxT("...")) )
+#endif
         {
 
             bool foundMatch = false;
+#ifdef _KOOK_DECODA_
+#else
             wxString partialName = wxFileName(fileName.Mid(3)).GetFullPath();
+#endif
 
             for (unsigned int fileIndex = 0; fileIndex < m_openFiles.size() && !foundMatch; ++fileIndex)
             {
@@ -3257,7 +3566,19 @@ void MainFrame::OnProjectExplorerItemActivated(wxTreeEvent& event)
     
     ProjectExplorerWindow::ItemData* data = m_projectExplorer->GetDataForItem(item);
 
+#ifdef _KOOK_DECODA_
+	if (data == NULL)
+		return;
+	if (data->type == 1 && data->path != NULL)
+	{
+		m_projectExplorer->ExpandPathItem(item);
+		m_project->SaveUserSettings();
+		return;
+	}
+	if (data->type == 0 && data->file != NULL)
+#else
     if (data != NULL && data->file != NULL)
+#endif
     {
 
         OpenFile* file = OpenProjectFile(data->file);
@@ -3273,6 +3594,11 @@ void MainFrame::OnProjectExplorerItemActivated(wxTreeEvent& event)
             {
                 GotoNewLine(file->edit, data->symbol->line, true);
             }
+
+#ifdef _KOOK_DECODA_
+			m_project->OpenFile(file->file);
+			m_project->SaveUserSettings();
+#endif
         }
 
     }
@@ -4624,7 +4950,10 @@ MainFrame::OpenFile* MainFrame::OpenDocument(const wxString& fileName)
 
         m_fileHistory.AddFileToHistory(param);
         openFile = OpenProjectFile(file);
-
+#ifdef _KOOK_DECODA_
+		m_project->OpenFile(file);
+		m_project->SaveUserSettings();
+#endif
     }
 
     if (openFile != NULL && lineNumber != 0)
@@ -4648,6 +4977,27 @@ void MainFrame::CloseDocument(int page, bool promptForSave)
     }
 
 }
+
+#ifdef _KOOK_DECODA_
+void MainFrame::CloseDocumentOther(int page)
+{
+
+
+}
+
+void MainFrame::CloseDocumentRight(int page)
+{
+
+	CodeEdit* edit = m_openFiles[page]->edit;
+
+	if (PreNotebookPageClose(page))
+	{
+		m_notebook->RemovePage(page);
+		delete edit;
+	}
+
+}
+#endif
 
 void MainFrame::SaveAllFiles()
 {
@@ -4717,6 +5067,9 @@ void MainFrame::SetDefaultHotKeys()
     m_keyBinder.SetShortcut(ID_DebugStartWithoutDebugging,  wxT("Ctrl+F5"));
     m_keyBinder.SetShortcut(ID_DebugStepInto,               wxT("F11"));
     m_keyBinder.SetShortcut(ID_DebugStepOver,               wxT("F10"));
+#ifdef _KOOK_DECODA_
+	m_keyBinder.SetShortcut(ID_DebugStepOut,				wxT("Ctrl+F10"));
+#endif
     m_keyBinder.SetShortcut(ID_DebugQuickWatch,             wxT("Shift+F9"));
     m_keyBinder.SetShortcut(ID_DebugToggleBreakpoint,       wxT("F9"));
     m_keyBinder.SetShortcut(ID_DebugDeleteAllBreakpoints,   wxT("Ctrl+Shift+F9"));
@@ -4818,7 +5171,15 @@ void MainFrame::ToggleBreakpoint(Project::File* file, unsigned int newLine)
     // set the break point "locally". When the debugger encounters the file
     // we'll send it the break points.
     bool set = m_project->ToggleBreakpoint(file, newLine);
+#ifdef _KOOK_DECODA_
+	m_breakpointsWindow->UpdateBreakpoints(file);
+#else
     m_breakpointsWindow->UpdateBreakpoints();
+#endif
+
+#ifdef _KOOK_DECODA_
+	m_project->SaveUserSettings();
+#endif
     
     if (openFile != NULL)
     {
@@ -4835,10 +5196,19 @@ void MainFrame::DeleteAllBreakpoints()
         return;
     }
 
+#ifdef _KOOK_DECODA_
+    for (unsigned int fileIndex = 0; fileIndex < m_project->GetNumUserFiles(); ++fileIndex)
+    {
+
+        Project::File* file = m_project->GetUserFile(fileIndex);
+		if (file->breakpoints.empty())
+			continue;
+#else
     for (unsigned int fileIndex = 0; fileIndex < m_project->GetNumFiles(); ++fileIndex)
     {
 
         Project::File* file = m_project->GetFile(fileIndex);
+#endif
 
         unsigned int openFileIndex = GetOpenFileIndex(file);
         OpenFile* openFile = NULL;
@@ -4869,9 +5239,17 @@ void MainFrame::DeleteAllBreakpoints()
         m_project->DeleteAllBreakpoints(file);
     }
 
+#ifdef _KOOK_DECODA_
+	m_project->SaveUserSettings();
+#endif
+
     DebugFrontend::Get().RemoveAllBreakPoints(0);
 
+#ifdef _KOOK_DECODA_
+	m_breakpointsWindow->ClearAllBreakpoints();
+#else
     m_breakpointsWindow->UpdateBreakpoints();
+#endif
 
 }
 
@@ -5338,6 +5716,142 @@ void MainFrame::FindInFiles(const wxString& text, const wxArrayString& fileNames
 
 }
 
+#ifdef _KOOK_DECODA_
+unsigned int MainFrame::FindInProjectFile(const wxString& caseText, const wxArrayString& fileTypesArray, bool matchCase, bool matchWholeWord, const Project::File* pfile)
+{
+	wxString fileName = pfile->fileName.GetFullPath();
+	wxString caseFileName = fileName.Lower();
+
+	unsigned int j;
+	for (j = 0; j < fileTypesArray.Count(); ++j)
+	{
+		if (caseFileName.Matches(fileTypesArray[j]))
+		{
+			break;
+		}
+	}
+	if (j == fileTypesArray.Count())
+		return 0;
+
+	FILE* file = fopen(fileName.c_str(), "rb");
+	if (file == NULL)
+	{
+		m_searchWindow->SearchMessage(wxString::Format("Error: Couldn't open \'") + fileName + "\'\n");
+		return 0;
+	}
+
+	fseek(file, 0, SEEK_END);
+	size_t length = ftell(file);
+	fseek(file, 0, SEEK_SET);
+
+	if (length == 0) {
+		m_searchWindow->SearchMessage(wxString::Format("Error: Couldn't read \'") + fileName + "\'\n");
+		return 0;
+	}
+
+	char* buffer = static_cast<char*>(malloc(length + 1));
+	length = fread(buffer, 1, length, file);
+	buffer[length] = 0;
+	fclose(file);
+
+	unsigned int numMatches = 0;
+
+	wxStringInputStream input(buffer);
+	wxTextInputStream textInput(input);
+
+	// Do a line by line search.
+
+	unsigned int lineNumber = 1;
+	bool hasMatch = false;
+
+	while (input.IsOk())
+	{
+		wxString line = textInput.ReadLine();
+		wxString caseLine = line;
+
+		if (!matchCase)
+		{
+			caseLine.MakeLower();
+		}
+
+		if (FindInLine(caseText, caseLine, matchWholeWord))
+		{
+			m_searchWindow->SearchMessage(wxString::Format("%s:%d: %s", fileName.ToAscii(), lineNumber, line.ToAscii()));
+
+			++numMatches;
+		}
+
+		++lineNumber;
+	}
+
+	free(buffer);
+
+	return numMatches;
+}
+
+unsigned int MainFrame::FindInProjectPath(const wxString& text, const wxArrayString& fileTypesArray, bool matchCase, bool matchWholeWord
+	, const Project::Path* path, unsigned int &numMatchFiles, unsigned int &numFiles)
+{
+	unsigned int numMatches = 0;
+	unsigned int num;
+
+	for (unsigned int i = 0; i < path->files.size(); ++i)
+	{	
+		num = FindInProjectFile(text, fileTypesArray, matchCase, matchWholeWord, path->files[i]);;
+		if (num > 0) {
+			numMatchFiles++;
+			numMatches += num;
+		}
+		numFiles++;
+	}
+
+	for (unsigned int i = 0; i < path->paths.size(); ++i)
+	{
+		numMatches += FindInProjectPath(text, fileTypesArray, matchCase, matchWholeWord, path->paths[i], numMatchFiles, numFiles);
+	}
+	return numMatches;
+}
+
+void MainFrame::FindInProject(const wxString& text, const wxArrayString& fileTypesArray, bool matchCase, bool matchWholeWord)
+{
+
+	wxString caseText = text;
+
+	if (!matchCase)
+	{
+		caseText.MakeLower();
+	}
+
+	unsigned int numMatches = 0;
+	unsigned int numMatchingFiles = 0;
+	unsigned int numFindFiles = 0;
+	unsigned int num = 0;
+
+	for (unsigned int i = 0; i < m_project->GetNumFiles(); ++i)
+	{
+		const Project::File* file = m_project->GetFile(i);
+
+		if (!file->temporary) {
+			num = FindInProjectFile(text, fileTypesArray, matchCase, matchWholeWord, file);
+			if (num > 0) {
+				numMatches += num;
+				numMatchingFiles++;
+			}
+			numFindFiles++;
+		}	
+	}
+
+	for (unsigned int i = 0; i < m_project->GetNumPaths(); ++i)
+	{
+		numMatches += FindInProjectPath(text, fileTypesArray, matchCase, matchWholeWord, m_project->GetPath(i), numMatchingFiles, numFindFiles);
+	}
+
+	m_searchWindow->SearchMessage(wxString::Format("Total found: %d\tMatching files: %d\tTotal files searched: %d",
+		numMatches, numMatchingFiles, numFindFiles));
+
+}
+#endif
+
 bool MainFrame::FindInLine(const wxString& text, const wxString& line, bool matchWholeWord) const
 {
     if (matchWholeWord)
@@ -5578,8 +6092,11 @@ void MainFrame::RemoveAllLocalBreakpoints(Project::File* file)
     }
     
     file->breakpoints.clear();
+#ifdef _KOOK_DECODA_
+	//m_breakpointsWindow->RemoveFile(file);
+#else
     m_breakpointsWindow->UpdateBreakpoints(file);
-
+#endif
 }
 
 bool MainFrame::InitializeSourceControl()
@@ -5949,10 +6466,21 @@ bool MainFrame::PreNotebookPageClose(int page, bool promptForSave)
         m_projectExplorer->RemoveFile(file);
         m_project->RemoveFile(file);
         m_breakpointsWindow->RemoveFile(file);
+#ifdef _KOOK_DECODA_
+		file = NULL;
+#endif
     }
 
     // Update the tab order
     RemovePageFromTabOrder(page);
+
+#ifdef _KOOK_DECODA_
+	if (!m_inSettingProject) {
+		if (file)
+			m_project->CloseFile(file);
+		m_project->SaveUserSettings();
+	}
+#endif
 
     return true;
 
@@ -6030,7 +6558,13 @@ void MainFrame::BringToFront()
 
 Project::File* MainFrame::GetFileMatchingSource(const wxFileName& fileName, const std::string& source) const
 {
-
+#ifdef _KOOK_DECODA_
+	Project::File* file = m_project->FildFile(fileName.GetFullName().Lower());
+	if (file && file->scriptIndex == -1)
+	{
+		return file;
+	}
+#else
     for (unsigned int i = 0; i < m_project->GetNumFiles(); ++i)
     {
 
@@ -6042,7 +6576,7 @@ Project::File* MainFrame::GetFileMatchingSource(const wxFileName& fileName, cons
         }
 
     }
-
+#endif
     return NULL;
 
 }
@@ -6105,6 +6639,13 @@ void MainFrame::UpdateForNewFile(Project::File* file)
     m_symbolParser->QueueForParsing(file);
     m_autoCompleteManager.BuildFromProject(m_project);
 }
+
+#ifdef _KOOK_DECODA_
+void MainFrame::UpdateForNewPath(Project::Path* path)
+{
+	m_projectExplorer->InsertPath(path);
+}
+#endif
 
 void MainFrame::SetFileStatus(Project::File* file, SourceControl::Status status)
 {

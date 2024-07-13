@@ -111,6 +111,12 @@ void ProjectFileInfoCtrl::OnPaint(wxPaintEvent& event)
     
     }
 
+#ifdef _KOOK_DECODA_
+	if (m_path != NULL) {
+
+		dc.DrawText(m_path->pathName, s_padding, s_padding);
+	}
+#endif
 }
 
 void ProjectFileInfoCtrl::OnMouseEnterWindow(wxMouseEvent& event)
@@ -124,12 +130,27 @@ void ProjectFileInfoCtrl::OnMouseEnterWindow(wxMouseEvent& event)
 
 void ProjectFileInfoCtrl::SetFile(const Project::File* file)
 {
+#ifdef _KOOK_DECODA_
+	m_path = NULL;
+#endif
     if (m_file != file)
     {
         m_file = file;
         Refresh();
     }
 }
+
+#ifdef _KOOK_DECODA_
+void ProjectFileInfoCtrl::SetPath(const Project::Path* path)
+{
+	m_file = NULL;
+	if (m_path != path)
+	{
+		m_path = path;
+		Refresh();
+	}
+}
+#endif
 
 const Project::File* ProjectFileInfoCtrl::GetFile() const
 {

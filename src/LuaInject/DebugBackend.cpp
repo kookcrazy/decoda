@@ -131,8 +131,19 @@ DebugBackend& DebugBackend::Get()
     return *s_instance;
 }
 
+#ifdef _KOOK_DECODA_
+bool DebugBackend::IsConnected()
+{
+	return Get().m_eventChannel.IsValid();
+}
+#endif
+
 void DebugBackend::Destroy()
 {
+#ifdef _KOOK_DECODA_
+	if (IsConnected())
+		Get().Message("DebugBackend Destroy");
+#endif
     delete s_instance;
     s_instance = NULL;
 }
@@ -146,6 +157,10 @@ DebugBackend::DebugBackend()
     m_mode                  = Mode_Continue;
     m_log                   = NULL;
     m_warnedAboutUserData   = false;
+#ifdef _KOOK_DECODA_
+	m_lastBreakSource		= NULL;
+	m_lastBreakScriptIndex	= -1;
+#endif
 }
 
 DebugBackend::~DebugBackend()
@@ -310,6 +325,11 @@ DebugBackend::VirtualMachine* DebugBackend::AttachState(unsigned long api, lua_S
 
     CriticalSectionLock lock(m_criticalSection);
 
+#ifdef _KOOK_DECODA_
+	if (!m_eventChannel.IsValid())
+		return NULL;
+#endif
+
     // Check if the virtual machine is aleady in our list. This happens
     // if we're attaching this virtual machine implicitly through lua_call
     // or lua_pcall.
@@ -335,6 +355,10 @@ DebugBackend::VirtualMachine* DebugBackend::AttachState(unsigned long api, lua_S
     vm->luaJitWorkAround    = false;
     vm->breakpointInStack   = true;// Force the stack tobe checked when the first script is entered
     vm->haveActiveBreakpoints = false;
+#ifdef _KOOK_DECODA_
+	vm->hadBreaked = false;
+	vm->lastStepSource		= NULL;
+#endif
     
     m_vms.push_back(vm);
     m_stateToVm.insert(std::make_pair(L, vm));
@@ -785,6 +809,7 @@ void DebugBackend::HookCallback(unsigned long api, lua_State* L, lua_Debug* ar)
     //Only try to downgrade the hook when the debugger is not stepping   
     if(m_mode == Mode_Continue)
     {
+		vm->hadBreaked = false;
         UpdateHookMode(api, L, ar);
     }
     else
@@ -798,20 +823,123 @@ void DebugBackend::HookCallback(unsigned long api, lua_State* L, lua_Debug* ar)
         vm->breakpointInStack = true;
     }
 
+#ifdef _KOOK_DECODA_
     int arevent = GetEvent(api, ar);
-    if (arevent == LUA_HOOKLINE)
-    {
+	if (arevent == LUA_HOOKLINE)
+	{
+		bool stop = false;
+		bool onLastStepLine = false;
+		bool check = true;
+		int scriptIndex;
 
-        // Fill in the rest of the structure.
-        lua_getinfo_dll(api, L, "Sl", ar);
-        const char* arsource = GetSource(api, ar);
-        int scriptIndex = GetScriptIndex(arsource);
+		switch (m_mode) {
+		case Mode_StepInto:
+			stop = true;
+			break;
+		case Mode_StepOut:
+			if (vm->callCount <= 0) {
+				vm->hadBreaked = true;
+				stop = true;
+			}
+			break;
+		case Mode_StepOver:
+			if (vm->callCount <= 0) {
+				stop = true;
+			}
+			break;
+		}
 
-        if (scriptIndex == -1)
-        {
-            // This isn't a script we've seen before, so tell the debugger about it.
-            scriptIndex = RegisterScript( api, L, ar);
-        }
+		while (check || stop) {
+			lua_getinfo_dll(api, L, "Sl", ar);
+			const char* arsource = GetSource(api, ar);
+
+			if (arsource == vm->lastStepSource)
+				scriptIndex = vm->lastStepScript;
+			else
+				scriptIndex = GetScriptIndex(arsource);
+
+			if (scriptIndex == -1)
+			{
+				if (m_mode != Mode_StepInto) {
+					vm->lastStepScript = scriptIndex;
+					vm->lastStepSource = arsource;
+					break;
+				}
+				scriptIndex = RegisterScript(api, L, ar);
+			}
+
+			if (scriptIndex != -1)
+			{
+				vm->lastStepScript = scriptIndex;
+				vm->lastStepSource = arsource;
+			}
+
+			if (vm->luaJitWorkAround)
+			{
+				int stackDepth = GetStackDepth(api, L);
+
+				//We will get multiple line events for the same line in LuaJIT if there are only calls to C functions on the line 
+				if (vm->lastStepLine == GetCurrentLine(api, ar))
+				{
+					onLastStepLine = vm->lastStepScript == scriptIndex && vm->callStackDepth != 0 && stackDepth == vm->callStackDepth;
+				}
+
+				// If we're stepping on each line or we just stepped out of a function that
+				// we were stepping over, break.
+				if (m_mode == Mode_StepOver && vm->callStackDepth > 0)
+				{
+					if (stackDepth < vm->callStackDepth || (stackDepth == vm->callStackDepth && !onLastStepLine))
+					{
+						// We've returned to the level when the function was called.
+						vm->callCount = 0;
+						vm->callStackDepth = 0;
+					}
+				}
+			}
+
+			if (!stop)
+			{
+				if (scriptIndex != -1)
+				{
+					// Check to see if we're on a breakpoint and should break.
+					if (!onLastStepLine && m_scripts[scriptIndex]->GetHasBreakPoint(GetCurrentLine(api, ar) - 1))
+					{
+						vm->hadBreaked = true;
+						stop = true;
+					}
+				}
+			}
+			break;
+		}
+
+		m_criticalSection.Exit();
+
+		if (stop)
+		{
+			BreakFromScript(api, L);
+
+			if (vm->luaJitWorkAround)
+			{
+				vm->callStackDepth = GetStackDepth(api, L);
+				vm->lastStepLine = GetCurrentLine(api, ar);
+			}
+		}
+	}
+#else
+	int arevent = GetEvent(api, ar);
+	if (arevent == LUA_HOOKLINE)
+	{
+		// Fill in the rest of the structure.
+		lua_getinfo_dll(api, L, "Sl", ar);
+		const char* arsource = GetSource(api, ar);
+
+		int scriptIndex = GetScriptIndex(arsource);
+
+		if (scriptIndex == -1)
+		{
+			// This isn't a script we've seen before, so tell the debugger about it.
+			scriptIndex = RegisterScript(api, L, ar);
+		}
 
         bool stop = false;
         bool onLastStepLine = false;
@@ -870,11 +998,26 @@ void DebugBackend::HookCallback(unsigned long api, lua_State* L, lua_Debug* ar)
                 vm->lastStepScript = scriptIndex;
             }
         }
-
-    }
+	}
+#endif
     else
     {
-        if (m_mode == Mode_StepOver)
+#ifdef _KOOK_DECODA_
+		if (m_mode == Mode_StepOver || m_mode == Mode_StepOut) {
+			if (GetIsHookEventTailCall(api, arevent)) // only LUA_HOOKTAILCALL for Lua 5.4
+			{
+			}
+			else if (GetIsHookEventRet(api, arevent)) // only LUA_HOOKRET for Lua 5.2, can also be LUA_HOOKTAILRET for older versions
+			{
+				--vm->callCount;
+			}
+			else if (GetIsHookEventCall(api, arevent)) // only LUA_HOOKCALL for Lua 5.1, can also be LUA_HOOKTAILCALL for newer versions
+			{
+				++vm->callCount;
+			}
+		}
+#else
+        if (m_mode == Mode_StepOver )
         {
             if (GetIsHookEventRet( api, arevent)) // only LUA_HOOKRET for Lua 5.2, can also be LUA_HOOKTAILRET for older versions
             {
@@ -891,6 +1034,7 @@ void DebugBackend::HookCallback(unsigned long api, lua_State* L, lua_Debug* ar)
                 }
             }
         }
+#endif
 
         m_criticalSection.Exit(); 
     
@@ -907,6 +1051,82 @@ void DebugBackend::UpdateHookMode(unsigned long api, lua_State* L, lua_Debug* ho
         return;
     }
 
+#ifdef _KOOK_DECODA_
+	HookMode currentMode = GetHookMode(api, L);
+	if (m_mode != Mode_Continue)
+	{
+		if (currentMode != HookMode_Full)
+			SetHookMode(api, L, HookMode_Full);
+		return;
+	}
+
+	VirtualMachine* vm = GetVm(L);
+	if (!vm->haveActiveBreakpoints)
+	{
+		if (currentMode != HookMode_None)
+			SetHookMode(api, L, HookMode_None);
+		return;
+	}
+	
+	HookMode mode = HookMode_CallsOnly;
+
+	// Populate the line number and source name debug fields
+	lua_getinfo_dll(api, L, "S", hookEvent);
+	int linedefined = GetLineDefined(api, hookEvent);
+
+	if (GetIsHookEventCall(api, arevent) && linedefined != -1)
+	{
+		const char* arsource = GetSource(api, hookEvent);
+		vm->lastFunctions = arsource;
+		int scriptIndex;
+		if (arsource == vm->lastStepSource)
+			scriptIndex = vm->lastStepScript;
+		else {
+			vm->lastStepSource = arsource;
+			vm->lastStepScript = scriptIndex = GetScriptIndex(arsource);
+		}
+
+		if (scriptIndex == -1)
+		{
+			RegisterScript(api, L, hookEvent);
+			scriptIndex = GetScriptIndex(vm->lastFunctions.c_str());
+			vm->lastStepScript = scriptIndex;
+		}
+
+		Script* script = scriptIndex != -1 ? m_scripts[scriptIndex] : NULL;
+
+		int lastlinedefined = GetLastLineDefined(api, hookEvent);
+		/*
+		if(script != NULL && (script->HasBreakPointInRange(linedefined, lastlinedefined) ||
+		//Check if the function is the top level chunk of a script because they always have there lastlinedefined set to 0
+		(script->HasBreakpointsActive() && linedefined == 0 && lastlinedefined == 0)))*/
+		if (script && script->HasBreakpointsActive() && (
+			(linedefined == 0 && lastlinedefined == 0) || script->HasBreakPointInRange(linedefined, lastlinedefined)
+			))
+		{
+			mode = HookMode_Full;
+			vm->breakpointInStack = true;
+		}
+	}
+
+	//Keep the hook in Full mode while theres a function in the stack somewhere that has a breakpoint in it
+	if (0)//mode != HookMode_Full && vm->breakpointInStack)
+	{
+		if (StackHasBreakpoint(api, L))
+		{
+			mode = HookMode_Full;
+		}
+		else
+		{
+			vm->breakpointInStack = false;
+		}
+	}
+
+	if (currentMode != mode)
+	{
+		SetHookMode(api, L, mode);
+	}
+#else
     VirtualMachine* vm = GetVm(L);
     HookMode mode = HookMode_CallsOnly;
 
@@ -967,6 +1187,7 @@ void DebugBackend::UpdateHookMode(unsigned long api, lua_State* L, lua_Debug* ho
         }
         SetHookMode(api, L, mode);
     }
+#endif
 }
 
 bool DebugBackend::StackHasBreakpoint(unsigned long api, lua_State* L)
@@ -986,9 +1207,15 @@ bool DebugBackend::StackHasBreakpoint(unsigned long api, lua_State* L)
             continue;
         }
 
+#ifdef _KOOK_DECODA_
+		const char* arsource = GetSource(api, &functionInfo);
+
+		int scriptIndex = GetScriptIndex(arsource);
+#else
         vm->lastFunctions = GetSource( api, &functionInfo);
 
         int scriptIndex = GetScriptIndex(vm->lastFunctions.c_str());
+#endif
         
         Script* script = scriptIndex != -1 ? m_scripts[scriptIndex] : NULL;
 
@@ -1108,6 +1335,11 @@ void DebugBackend::CommandThreadProc()
             case CommandId_StepInto:
                 StepInto();
                 break;
+#ifdef _KOOK_DECODA_
+			case CommandId_StepOut:
+				StepOut();
+				break;
+#endif
             case CommandId_DeleteAllBreakpoints:
                 DeleteAllBreakpoints();
                 break;
@@ -1201,6 +1433,24 @@ void DebugBackend::ActiveLuaHookInAllVms()
     }
 }
 
+#ifdef _KOOK_DECODA_
+void DebugBackend::ActiveLuaHook(lua_State* L)
+{
+	StateToVmMap::iterator end = m_stateToVm.end();
+
+	for (StateToVmMap::iterator it = m_stateToVm.begin(); it != end; it++)
+	{
+		VirtualMachine* vm = it->second;
+
+		if (vm->L == L)
+		{
+			SetHookMode(vm->api, vm->L, HookMode_Full);
+			return;
+		}	
+	}
+}
+#endif
+
 void DebugBackend::StepInto()
 {
     
@@ -1233,6 +1483,22 @@ void DebugBackend::StepOver()
     ActiveLuaHookInAllVms();
 }
 
+#ifdef _KOOK_DECODA_
+void DebugBackend::StepOut()
+{
+	CriticalSectionLock lock(m_criticalSection);
+
+	for (unsigned int i = 0; i < m_vms.size(); ++i)
+	{
+		m_vms[i]->callCount = 1;
+	}
+
+	m_mode = Mode_StepOut;
+	SetEvent(m_stepEvent);
+
+	ActiveLuaHookInAllVms();
+}
+#endif
 
 void DebugBackend::Continue()
 {
@@ -1451,6 +1717,56 @@ void DebugBackend::BreakFromScript(unsigned long api, lua_State* L)
     WaitForContinue();        
 }
 
+#ifdef _KOOK_DECODA_
+int DebugBackend::Call(unsigned long api, lua_State* L, int nargs, int nresults, int errorfunc, lua_KContext ctx, lua_KFunction kf)
+{
+	if (lua_tocfunction_dll(api, L, -1) == StaticErrorHandler || (errorfunc != 0 && lua_tocfunction_dll(api, L, errorfunc) == StaticErrorHandler))
+	{
+		Message("Call_ 1");
+		return lua_pcallk_540_dll(api, L, nargs, nresults, errorfunc, ctx, kf);
+	}
+	else
+	{
+
+		int result = 0;
+
+		if (lua_gettop_dll(api, L) >= nargs + 1)
+		{
+			// Push our error handler onto the stack before the function and the arguments.
+			if (errorfunc != 0)
+			{
+				lua_pushvalue_dll(api, L, errorfunc);
+			}
+			else
+			{
+				lua_pushnil_dll(api, L);
+			}
+			lua_pushcclosure_dll(api, L, StaticErrorHandler, 1);
+
+			int errorHandler = lua_gettop_dll(api, L) - (nargs + 1);
+			lua_insert_dll(api, L, errorHandler);
+
+			// Invoke the function
+			result = lua_pcallk_540_dll(api, L, nargs, nresults, errorHandler, ctx, kf);
+			//lua_pcallk_540_dll(api, L, nargs, nresults, 0, ctx, kf);
+
+			// Remove our error handler from the stack.
+			lua_remove_dll(api, L, errorHandler);
+
+		}
+		else
+		{
+			Message("Call 5");
+			// In this case there wasn't a function on the top of the stack, so don't push our
+			// error handler there since it will get called instead.
+			result = lua_pcallk_540_dll(api, L, nargs, nresults, errorfunc, ctx, kf);
+		}
+		return result;
+
+	}
+}
+#endif
+
 int DebugBackend::Call(unsigned long api, lua_State* L, int nargs, int nresults, int errorfunc)
 {
 
@@ -1635,7 +1951,19 @@ bool DebugBackend::CreateEnvironment(unsigned long api, lua_State* L, int stackL
         return false;
     }
 
-    const char* name = NULL;
+	const char* name = NULL;
+#ifdef _KOOK_DECODA_
+	name = lua_getlocal_dll(api, L, &stackEntry, 1);
+	if (name == NULL)
+		lua_pushnil_dll(api, L);
+	else if (strcmp(name, "self") != 0) {
+		lua_pop_dll(api, L, 1);
+		lua_pushnil_dll(api, L);
+	}
+
+	if (!lua_getfuncclass_dll(api, L, stackLevel))
+		lua_pushnil_dll(api, L);
+#endif
 
     // Copy the local variables into a new table.
 
@@ -1716,7 +2044,11 @@ bool DebugBackend::CreateEnvironment(unsigned long api, lua_State* L, int stackL
     lua_remove_dll(api, L, functionIndex);
 
     int t2 = lua_gettop_dll(api, L);
-    assert(t2 - t1 == 3);
+#ifdef _KOOK_DECODA_
+    assert(t2 - t1 == 5);
+#else
+	assert(t2 - t1 == 3);
+#endif
     
     return true;
 
@@ -1990,6 +2322,10 @@ bool DebugBackend::Evaluate(unsigned long api, lua_State* L, const std::string& 
     int envTable     = lua_gettop_dll(api, L);
     int upValueTable = envTable - 1;
     int localTable   = envTable - 2;
+#ifdef _KOOK_DECODA_
+	int envClass	 = envTable - 3;
+	int self		 = envTable - 4;
+#endif
 
     // Disable the debugger hook so that we don't try to debug the expression.
     SetHookMode(api, L, HookMode_None);
@@ -2004,21 +2340,45 @@ bool DebugBackend::Evaluate(unsigned long api, lua_State* L, const std::string& 
     statement  = "return \n";
     statement += expression;
     
-    int error = LoadScriptWithoutIntercept(api, L, statement.c_str());
+#ifdef _KOOK_DECODA_
+    int error = LoadScriptWithoutIntercept(api, L, statement.c_str(), stackLevel);
+#else
+	int error = LoadScriptWithoutIntercept(api, L, statement.c_str());
+#endif
 
     if (error == LUA_ERRSYNTAX)
     {
         // The original expression may be a statement, so try loading it that way.
         lua_pop_dll(api, L, 1);
-        error = LoadScriptWithoutIntercept(api, L, expression.c_str());
+#ifdef _KOOK_DECODA_
+        error = LoadScriptWithoutIntercept(api, L, expression.c_str(), stackLevel);
+#else
+		error = LoadScriptWithoutIntercept(api, L, expression.c_str());
+#endif
     }
 
+#ifdef _KOOK_DECODA_
+	int funcTop = lua_gettop_dll(api, L);
     if (error == 0)
+    {
+        lua_pushvalue_dll(api, L, envTable);
+        lua_setfenv_dll(api, L, -2);
+
+		if (lua_isnil_dll(api, L, self))
+			error = lua_pcall_dll(api, L, 0, LUA_MULTRET, 0);
+		else {
+			lua_pushvalue_dll(api, L, self);
+			error = lua_pcall_dll(api, L, 1, LUA_MULTRET, 0);
+		}
+    }
+#else
+	if (error == 0)
     {
         lua_pushvalue_dll(api, L, envTable);
         lua_setfenv_dll(api, L, -2);
         error = lua_pcall_dll(api, L, 0, LUA_MULTRET, 0);
     }
+#endif
 
     TiXmlDocument document;
         
@@ -2045,8 +2405,11 @@ bool DebugBackend::Evaluate(unsigned long api, lua_State* L, const std::string& 
 
         for (int i = 0; i < nresults; ++i)
         {
-
+#ifdef _KOOK_DECODA_
+			TiXmlNode* node = GetValueAsText(api, L, -1 - (nresults - 1 - i), 3);
+#else
             TiXmlNode* node = GetValueAsText(api, L, -1 - (nresults - 1 - i));
+#endif
 
             if (node != NULL)
             {
@@ -2094,7 +2457,11 @@ bool DebugBackend::Evaluate(unsigned long api, lua_State* L, const std::string& 
     SetUpValues(api, L, stackLevel, upValueTable, nilSentinel);
 
     // Remove the local, up value and environment tables from the stack.
-    lua_pop_dll(api, L, 3);
+#ifdef _KOOK_DECODA_
+    lua_pop_dll(api, L, 5);
+#else
+	lua_pop_dll(api, L, 3);
+#endif
 
     // Remove the nil sentinel.
     lua_pop_dll(api, L, 1);
@@ -2290,6 +2657,9 @@ TiXmlNode* DebugBackend::GetValueAsText(unsigned long api, lua_State* L, int n, 
 
     if (strcmp(typeName, "table") == 0)
     {
+#ifdef _KOOK_DECODA_
+		typeNameOverride = NULL;
+#endif
         int stackStart = lua_gettop_dll(api, L);
         int result = 0;
         std::string className;
@@ -2325,6 +2695,23 @@ TiXmlNode* DebugBackend::GetValueAsText(unsigned long api, lua_State* L, int n, 
         // Remove the duplicated value.
         lua_pop_dll(api, L, 1);
     }
+#ifdef _KOOK_DECODA_
+	else if (type == LUA_TCLASSOBJ) // strcmp(typeName, "classobj") == 0)
+	{
+		typeNameOverride = lua_classname_dll(api, L, -1);
+		node = GetTableAsText(api, L, -1, maxDepth - 1, typeNameOverride);
+		// Remove the duplicated value.
+		lua_pop_dll(api, L, 1);
+	}
+	else if (type == LUA_TCLASS) //strcmp(typeName, "class") == 0)
+	{
+		typeNameOverride = lua_classname_dll(api, L, -1);
+		node = new TiXmlElement("class");
+		node->LinkEndChild(WriteXmlNode("type", typeNameOverride));
+
+		lua_pop_dll(api, L, 1);
+	}
+#endif
     else if (strcmp(typeName, "function") == 0)
     {
 
@@ -2773,6 +3160,17 @@ void DebugBackend::RegisterClassName(unsigned long api, lua_State* L, const char
 
 }
 
+#ifdef _KOOK_DECODA_
+int DebugBackend::LoadScriptWithoutIntercept(unsigned long api, lua_State* L, const char* buffer, size_t size, const char* name, int env)
+{
+    return lua_loadbufferk_dll(api, L, buffer, size, name, NULL, env);
+}
+
+int DebugBackend::LoadScriptWithoutIntercept(unsigned long api, lua_State* L, const std::string& string, int env)
+{
+    return LoadScriptWithoutIntercept(api, L, string.c_str(), string.length(), string.c_str(), env);
+}
+#else
 int DebugBackend::LoadScriptWithoutIntercept(unsigned long api, lua_State* L, const char* buffer, size_t size, const char* name)
 {
     return lua_loadbuffer_dll(api, L, buffer, size, name, NULL);
@@ -2782,6 +3180,7 @@ int DebugBackend::LoadScriptWithoutIntercept(unsigned long api, lua_State* L, co
 {
     return LoadScriptWithoutIntercept(api, L, string.c_str(), string.length(), string.c_str());
 }
+#endif
 
 DWORD WINAPI DebugBackend::FinishInitialize(LPVOID param)
 {

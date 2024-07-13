@@ -29,6 +29,9 @@ along with Decoda.  If not, see <http://www.gnu.org/licenses/>.
 #include "Protocol.h"
 
 #include <vector>
+#ifdef _KOOK_DECODA_
+#include <map>
+#endif
 
 // 
 // Forward declarations.
@@ -48,9 +51,25 @@ public:
     enum Status
     {
         Status_None,
+#ifdef _KOOK_DECODA_
+		Status_CheckedIn	= 1,
+		Status_CheckedOut	= 2,
+		Status_Open			= 4,
+#else
         Status_CheckedIn,
         Status_CheckedOut,
+#endif
     };
+
+#ifdef _KOOK_DECODA_
+	struct Path;
+
+	enum PathStatus
+	{
+		PathStatus_None,
+		PathStatus_Expand,
+	};
+#endif
 
     struct File
     {
@@ -71,7 +90,24 @@ public:
         unsigned int                fileId;     // Unique id we use to match up symbol parsing results.
         std::vector<Symbol*>        symbols;
 
+#ifdef _KOOK_DECODA_
+		bool						used;
+		bool						opened;
+		Path*						path;
+#endif
     };
+
+#ifdef _KOOK_DECODA_
+	struct Path
+	{
+		wxString GetDisplayName() const;
+
+		wxString					pathName;
+		std::vector<File*>			files;
+		std::vector<Path*>			paths;
+		PathStatus                  status;
+	};
+#endif
 
     /**
      * Constructor.
@@ -103,6 +139,10 @@ public:
      * Loads the project setting from the specified file.
      */
     bool Load(const wxString& fileName);
+
+#ifdef _KOOK_DECODA_
+	bool SaveUserSettings();
+#endif
 
     /**
      * Returns the file name where the project was last saved/loaded file.
@@ -263,6 +303,29 @@ public:
      */
     unsigned int GetNumFiles() const;
 
+#ifdef _KOOK_DECODA_
+	Path* AddPath(const wxString& fileName);
+	Path* GetPath(unsigned int pathIndex);
+	const Path* GetPath(unsigned int pathIndex) const;
+
+	unsigned int GetNumPaths() const;
+	void AddFiles2Path(const wxString& pathName, Project::Path* path);
+
+	unsigned int GetNumUserFiles() const;
+	File* GetUserFile(unsigned int fileIndex);
+	const File* GetUserFile(unsigned int fileIndex) const;
+
+	void OpenFile(Project::File* file);
+	void CloseFile(Project::File* file);
+
+	void SetCurFile(Project::File* file);
+	Project::File* GetCurFile();
+
+	Project::File* FildFile(const wxString& fileName);
+
+	void setFileScriptIndex(Project::File* file, unsigned scriptIndex);
+#endif
+
     /**
      * Clears the script indices for all of the files.
      */
@@ -284,6 +347,10 @@ public:
      * Deletes all of the breakpoints from the specified file.
      */
     void DeleteAllBreakpoints(File* file);
+
+#ifdef _KOOK_DECODA_
+	void SetPathStatus(Path* path, PathStatus status);
+#endif
 
 private:
 
@@ -318,6 +385,17 @@ private:
      * a files node, the method returns false.
      */
     bool LoadUserFilesNode(const wxString& baseDirectory, wxXmlNode* node);
+
+#ifdef _KOOK_DECODA_
+	wxXmlNode* SavePathNode(const wxString& baseDirectory, const Path* path);
+	bool LoadPathNode(const wxString& baseDirectory, wxXmlNode* node);
+	wxXmlNode* SaveUserPathNode(const wxString& baseDirectory, const Path* path) const;
+	bool LoadUserPathNode(const wxString& baseDirectory, wxXmlNode* node, Path* parent = NULL);
+	bool LoadUserPathsNode(const wxString& baseDirectory, wxXmlNode* node);
+
+	void CheckAddUserFile(File* file);
+	void CheckDelUserFile(File* file);
+#endif
 
     /**
      * Loads the breakpoint node. If the XML node is not a breakpoint node,
@@ -375,6 +453,13 @@ private:
     wxString                m_symbolsDirectory;
 
     std::vector<File*>      m_files;
+#ifdef _KOOK_DECODA_
+	std::vector<Path*>		m_paths;
+	typedef std::map<wxString, File*> FILEMAP;
+	FILEMAP					m_fileMap;
+	std::vector<File*>      m_userfiles;
+	wxString				m_curOpenFileName;
+#endif
 
     unsigned int            m_tempIndex;
 

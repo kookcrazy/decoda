@@ -51,11 +51,29 @@ public:
     /**
      * Stores data for a node in the tree.
      */
-    struct ItemData : public wxTreeItemData
-    {
-        Project::File*      file;
-        Symbol*             symbol;
-    };
+    
+
+#ifdef _KOOK_DECODA_
+	struct ItemData : public wxTreeItemData
+	{
+		int type;
+		union {
+			struct {
+				Project::Path*      path;
+			};
+			struct {
+				Project::File*      file;
+				Symbol*             symbol;
+			};
+		};
+	};
+#else
+	struct ItemData : public wxTreeItemData
+	{
+		Project::File*      file;
+		Symbol*             symbol;
+	};
+#endif
 
     enum FilterFlag
     {
@@ -160,6 +178,11 @@ public:
      */
     void SetFileContextMenu(wxMenu* menu);
 
+#ifdef _KOOK_DECODA_
+	void InsertPath(Project::Path* path);
+	void ExpandPathItem(wxTreeItemId node);
+#endif
+
     /**
      * Gets a list of all of the files that are currently selected in the tree.
      * Non-files that are selected are ignored.
@@ -235,6 +258,12 @@ private:
      */
     void RebuildForFile(Project::File* file);
 
+#ifdef _KOOK_DECODA_
+	void UpdateForFile(wxTreeItemId node, Project::File* file);
+	bool UpdatePathFile(wxTreeItemId node, Project::File* file);
+	void RebuildForPath(Project::Path* path, wxTreeItemId root);
+#endif
+
     /**
      * Returns the image that should be used to display the file.
      */
@@ -266,6 +295,10 @@ private:
         Image_FileTempCheckedIn     = 5,
         Image_FileCheckedOut        = 6,
         Image_FileTempCheckedOut    = 7,
+#ifdef _KOOK_DECODA_
+		Image_Path					= 8,
+		Image_PathOpen				= 9,
+#endif
     };
 
     Project*                    m_project;

@@ -82,6 +82,10 @@ public:
 
     static wxString GetTableAsText(wxXmlNode* root);
 
+#ifdef _KOOK_DECODA_
+	static wxString GetClassObjAsText(wxXmlNode* root);
+#endif
+
     DECLARE_EVENT_TABLE()
 
 private:

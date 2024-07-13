@@ -67,6 +67,9 @@ enum CommandId
     CommandId_LoadDone          = 12,   // Signals to the backend that the frontend has finished processing a load.
     CommandId_IgnoreException   = 13,   // Instructs the backend to ignore the specified exception message in the future.
     CommandId_DeleteAllBreakpoints = 14,// Instructs the backend to clear all breakpoints set
+#ifdef _KOOK_DECODA_
+	CommandId_StepOut			= 15,    // Steps to the next line, out any functions.
+#endif
 };
 
 #endif

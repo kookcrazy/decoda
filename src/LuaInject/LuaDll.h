@@ -73,8 +73,17 @@ lua_Number      lua_tonumber_dll        (unsigned long api, lua_State*, int);
 void*           lua_touserdata_dll      (unsigned long api, lua_State* L, int index);
 int             lua_gettop_dll          (unsigned long api, lua_State*);
 int             lua_loadbuffer_dll      (unsigned long api, lua_State*, const char*, size_t, const char*, const char*);
+#ifdef _KOOK_DECODA_
+int             lua_loadbufferk_dll		(unsigned long api, lua_State*, const char*, size_t, const char*, const char*, int env);
+#endif
 void            lua_call_dll            (unsigned long api, lua_State*, int, int);
+#ifdef _KOOK_DECODA_
+void            lua_callk_540_dll		(unsigned long api, lua_State*, int, int, lua_KContext ctx, lua_KFunction kf);
+#endif
 int             lua_pcall_dll           (unsigned long api, lua_State*, int, int, int);
+#ifdef _KOOK_DECODA_
+int             lua_pcallk_540_dll		(unsigned long api, lua_State*, int, int, int, lua_KContext ctx, lua_KFunction kf);
+#endif
 void            lua_newtable_dll        (unsigned long api, lua_State*);
 int             lua_next_dll            (unsigned long api, lua_State*, int);
 int             lua_rawequal_dll        (unsigned long api, lua_State *L, int idx1, int idx2);
@@ -94,6 +103,10 @@ void            lua_getfenv_dll         (unsigned long api, lua_State *L, int in
 int             lua_setfenv_dll         (unsigned long api, lua_State *L, int index);
 void *          lua_newuserdata_dll     (unsigned long api, lua_State *L, size_t size);
 int             lua_checkstack_dll      (unsigned long api, lua_State *L, int extra);
+#ifdef _KOOK_DECODA_
+int				lua_getfuncclass_dll	(unsigned long api, lua_State *L, int level);
+const char*		lua_classname_dll		(unsigned long api, lua_State *L, int index);
+#endif
 
 /**
  * Similar to lua_pushthread, but will be emulated under Lua 5.0. The return
@@ -187,6 +200,10 @@ const char* GetSource(unsigned long api, const lua_Debug* ar);
 const char* GetWhat(unsigned long api, const lua_Debug* ar);
 const char* GetName(unsigned long api, const lua_Debug* ar);
 const char* GetHookEventName(unsigned long api, const lua_Debug* ar);
+#ifdef _KOOK_DECODA_
+struct CallInfo* GetCallInfo(unsigned long api, const lua_Debug* ar);
+bool GetIsHookEventTailCall(unsigned long api, int event);
+#endif
 
 /**
  * Creates a new function that can be used with the specified API. The new function

@@ -114,6 +114,10 @@ public:
      */
     void StepOver();
 
+#ifdef _KOOK_DECODA_
+	void StepOut();
+#endif
+
     /**
      * Continues execution until a breakpoint is hit.
      */
@@ -126,6 +130,10 @@ public:
     void Break();
 
     void ActiveLuaHookInAllVms();
+
+#ifdef _KOOK_DECODA_
+	void ActiveLuaHook(lua_State* L);
+#endif
 
     /**
      * Evalates the expression. If there was an error evaluating the expression the
@@ -171,6 +179,9 @@ public:
      * triggers a debugger exception on error.
      */
     int Call(unsigned long api, lua_State* L, int nargs, int nresults, int errorfunc);
+#ifdef _KOOK_DECODA_
+	int Call(unsigned long api, lua_State* L, int nargs, int nresults, int errorfunc, lua_KContext ctx, lua_KFunction kf);
+#endif
 
     /**
      * Returns the index of the script in the scripts array with the specified
@@ -357,12 +368,20 @@ private:
     /**
      * This is semantically equivalent to luaL_loadstring.
      */
-    int LoadScriptWithoutIntercept(unsigned long api, lua_State* L, const char* string, size_t size, const char* name);
+#ifdef _KOOK_DECODA_
+    int LoadScriptWithoutIntercept(unsigned long api, lua_State* L, const char* string, size_t size, const char* name, int env=0);
+#else
+	int LoadScriptWithoutIntercept(unsigned long api, lua_State* L, const char* string, size_t size, const char* name);
+#endif
 
     /**
      * This is semantically equivalent to luaL_loadstring.
      */
-    int LoadScriptWithoutIntercept(unsigned long api, lua_State* L, const std::string& string);
+#ifdef _KOOK_DECODA_
+    int LoadScriptWithoutIntercept(unsigned long api, lua_State* L, const std::string& string, int env=0);
+#else
+	int LoadScriptWithoutIntercept(unsigned long api, lua_State* L, const std::string& string);
+#endif
     
     /**
      * Called by the front end once the DLL is finished loading to finish
@@ -382,6 +401,9 @@ private:
         Mode_Continue,
         Mode_StepOver,
         Mode_StepInto,
+#ifdef _KOOK_DECODA_
+		Mode_StepOut,
+#endif
     };
     
     struct Api
@@ -407,12 +429,18 @@ private:
         int             callStackDepth;
         int             lastStepLine;
         int             lastStepScript;
+#ifdef _KOOK_DECODA_
+		const char*		lastStepSource;
+#endif
         unsigned long   api;
         std::string     name;
         unsigned int    stackTop;
         bool            luaJitWorkAround;
         bool            breakpointInStack;
         bool            haveActiveBreakpoints;
+#ifdef _KOOK_DECODA_
+		bool			hadBreaked;
+#endif
         std::string     lastFunctions;
     };
 
@@ -580,6 +608,9 @@ private:
         const lua_Debug scriptStack[], unsigned int scriptStackSize,
         StackEntry unifiedStack[]);
 
+#ifdef _KOOK_DECODA_
+	static bool IsConnected();
+#endif
 private:
 
     typedef stdext::hash_map<lua_State*, VirtualMachine*>   StateToVmMap;
@@ -616,6 +647,11 @@ private:
     std::vector<Api>                m_apis;
 
     mutable bool                    m_warnedAboutUserData;
+
+#ifdef _KOOK_DECODA_
+	const char*						m_lastBreakSource;
+	int								m_lastBreakScriptIndex;
+#endif
 
 };
 

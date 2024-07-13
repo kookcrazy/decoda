@@ -44,12 +44,41 @@ extern "C"
 		struct CallInfo *i_ci;  /* active function */
 	};
 
+#ifdef _KOOK_DECODA_
+	struct lua_Debug_54 {
+		int event;
+		const char *name;	/* (n) */
+		const char *namewhat;	/* (n) 'global', 'local', 'field', 'method' */
+		const char *what;	/* (S) 'Lua', 'C', 'main', 'tail' */
+		const char *source;	/* (S) */
+		size_t srclen;	/* (S) */
+		int currentline;	/* (l) */
+		int linedefined;	/* (S) */
+		int lastlinedefined;	/* (S) */
+		unsigned char nups;	/* (u) number of upvalues */
+		unsigned char nparams;/* (u) number of parameters */
+		char isvararg;        /* (u) */
+		char istailcall;	/* (t) */
+		unsigned short ftransfer;   /* (r) index of first value transferred */
+		unsigned short ntransfer;   /* (r) number of transferred values */
+		char short_src[LUA_IDSIZE]; /* (S) */
+									/* private part */
+		struct CallInfo *i_ci;  /* active function */
+	};
+
+	union lua_Debug
+	{
+		lua_Debug_51 ld51;
+		lua_Debug_52 ld52;
+		lua_Debug_54 ld54;
+	};
+#else
 	union lua_Debug
 	{
 		lua_Debug_51 ld51;
 		lua_Debug_52 ld52;
 	};
-
+#endif
 	// =====================================================
 	// must match the configuration of the VM being debugged
 	// =====================================================
@@ -88,6 +117,10 @@ extern "C"
 	#define LUA_TFUNCTION		6
 	#define LUA_TUSERDATA		7
 	#define LUA_TTHREAD		8
+#ifdef _KOOK_DECODA_
+	#define LUA_TCLASS		9	//kooklua
+	#define LUA_TCLASSOBJ	10	//kooklua
+#endif
 
 	#define LUA_OK		0 // Since Lua 5.2
 	#define LUA_YIELD	1
@@ -97,11 +130,20 @@ extern "C"
 	#define LUA_ERRGCMM	5 // Since Lua 5.2
 	// LUA_ERRERR	is 5 in Lua 5.1, but 6 in Lua 5.2
 
+#ifdef _KOOK_DECODA_
+	typedef ptrdiff_t lua_KContext;
+#ifdef _KOOK_DECODA_
+
 	struct lua_State;
 	typedef void * (*lua_Alloc) (void *ud, void *ptr, size_t osize, size_t nsize);
 	typedef void (*lua_Hook) (lua_State *L, lua_Debug *ar);
 	typedef int (*lua_CFunction) (lua_State *L);
+	
 	typedef const char * (*lua_Reader) (lua_State *L, void *ud, size_t *sz);
+#ifdef _KOOK_DECODA_
+	typedef int (*lua_KFunction) (lua_State *L, int status, lua_KContext ctx);
+	typedef int (*lua_Seeker) (lua_State *L, void *ud, int off);
+#endif
 
 } // extern "C"
 

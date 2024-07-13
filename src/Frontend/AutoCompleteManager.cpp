@@ -45,10 +45,18 @@ void AutoCompleteManager::BuildFromProject(const Project* project)
     
     m_entries.clear();
 
+#ifdef _KOOK_DECODA_
+	for (unsigned int fileIndex = 0; fileIndex < project->GetNumUserFiles(); ++fileIndex)
+	{
+		const Project::File* file = project->GetUserFile(fileIndex);
+		BuildFromFile(file);
+	}
+#else
     for (unsigned int fileIndex = 0; fileIndex < project->GetNumFiles(); ++fileIndex)
     {
         BuildFromFile(project->GetFile(fileIndex));
     }
+#endif
 
     // Sort the autocompletions (necessary for binary search).
     std::sort(m_entries.begin(), m_entries.end());

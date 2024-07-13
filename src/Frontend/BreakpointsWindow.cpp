@@ -109,7 +109,11 @@ void BreakpointsWindow::SetProject(Project* project)
 
 void BreakpointsWindow::RemoveFile(Project::File* file)
 {
+#ifdef _KOOK_DECODA_
+	ClearBreakpoints(file);
+#else
     UpdateBreakpoints();
+#endif
 }
 
 void BreakpointsWindow::UpdateBreakpoints()
@@ -120,10 +124,17 @@ void BreakpointsWindow::UpdateBreakpoints()
 
     if (m_project != NULL)
     {
+#ifdef _KOOK_DECODA_
+		for (unsigned int i = 0; i < m_project->GetNumUserFiles(); ++i)
+		{
+			AddBreakpointsForFile(m_project->GetUserFile(i));
+		}
+#else
         for (unsigned int i = 0; i < m_project->GetNumFiles(); ++i)
         {
             AddBreakpointsForFile(m_project->GetFile(i));
         }
+#endif
     }
 
     m_breakpointList->Thaw();
@@ -134,10 +145,141 @@ void BreakpointsWindow::UpdateBreakpoints()
 
 void BreakpointsWindow::UpdateBreakpoints(Project::File* file)
 {
+#ifdef _KOOK_DECODA_
+	if (file->breakpoints.empty()) {
+		ClearBreakpoints(file);
+		return;
+	}
+
+	int count = m_breakpointList->GetItemCount();
+	if (count == 0)
+		return;
+
+	int fbps_index = file->breakpoints.size() - 1;
+	unsigned int fbps_lastline = file->breakpoints[fbps_index];
+	bool changed = false;
+	long list_lastitem = count - 1;
+
+	m_breakpointList->Freeze();
+	for (long i = count; i > 0; i--) {
+		Breakpoint* breakpoint = reinterpret_cast<Breakpoint*>(m_breakpointList->GetItemData(i - 1));
+		if (breakpoint->file != file) {
+			if (fbps_index < 0)
+				break;
+			continue;
+		}
+
+		list_lastitem = i - 1;
+		if (fbps_index < 0) {
+			m_breakpointList->DeleteItem(i - 1);
+			delete breakpoint;
+			changed = true;
+			continue;
+		}
+		while (breakpoint->line < fbps_lastline) {
+			long item = m_breakpointList->InsertItem(list_lastitem+1, -1);
+			m_breakpointList->SetItemColumnImage(item, 0, 0);
+
+			wxString name;
+			name.Printf(wxT("%s, line %d"), file->GetDisplayName(), fbps_lastline + 1);
+
+			m_breakpointList->SetItem(item, 1, name);
+
+			Breakpoint* newbreakpoint = new Breakpoint;
+			newbreakpoint->file = file;
+			newbreakpoint->line = fbps_lastline;
+
+			m_breakpointList->SetItemPtrData(item, reinterpret_cast<wxUIntPtr>(newbreakpoint));
+
+			if (fbps_index-- == 0)
+				break;
+			fbps_lastline = file->breakpoints[fbps_index];
+		}
+        if (fbps_index < 0)
+            continue;
+		if (breakpoint->line > fbps_lastline) {
+			m_breakpointList->DeleteItem(i - 1);
+			delete breakpoint;
+			changed = true;
+		}
+		else if (fbps_index-- == 0)
+			continue;
+		else {
+			fbps_lastline = file->breakpoints[fbps_index];
+		}
+	}
+	for (int i = fbps_index + 1; i > 0; i--) {
+		long item = m_breakpointList->InsertItem(list_lastitem, -1);
+		m_breakpointList->SetItemColumnImage(item, 0, 0);
+
+		wxString name;
+		name.Printf(wxT("%s, line %d"), file->GetDisplayName(), file->breakpoints[i-1] + 1);
+
+		m_breakpointList->SetItem(item, 1, name);
+
+		Breakpoint* breakpoint = new Breakpoint;
+		breakpoint->file = file;
+		breakpoint->line = file->breakpoints[i - 1];
+
+		m_breakpointList->SetItemPtrData(item, reinterpret_cast<wxUIntPtr>(breakpoint));
+	}
+	m_breakpointList->Thaw();
+
+	if (!changed)
+		return;
+	
+	UpdateToolBarStatus();
+#else
     // For now, just update all of the breakpoints. We have this interface in here
     // so that in the future we can update more selectively if necessary for performance.
     UpdateBreakpoints();
+#endif
 }
+
+#ifdef _KOOK_DECODA_
+void BreakpointsWindow::ClearAllBreakpoints()
+{
+	int count = m_breakpointList->GetItemCount();
+	if (count == 0)
+		return;
+
+	m_breakpointList->Freeze();
+	for (int itemIndex = 0; itemIndex < count; ++itemIndex)
+	{
+		Breakpoint* breakpoint = reinterpret_cast<Breakpoint*>(m_breakpointList->GetItemData(itemIndex));
+		delete breakpoint;
+	}
+	m_breakpointList->DeleteAllItems();
+	m_breakpointList->Thaw();
+
+	UpdateToolBarStatus();
+}
+
+void BreakpointsWindow::ClearBreakpoints(Project::File* file)
+{
+	int count = m_breakpointList->GetItemCount();
+	if (count == 0)
+		return;
+
+	bool found = false;
+	m_breakpointList->Freeze();
+	for (int i = count; i > 0; i--) {
+		Breakpoint* breakpoint = reinterpret_cast<Breakpoint*>(m_breakpointList->GetItemData(i-1));
+		if (breakpoint->file == file) {
+			m_breakpointList->DeleteItem(i-1);
+			delete breakpoint;
+			found = true;
+		}
+	}
+	m_breakpointList->Thaw();
+
+	if (!found)
+		return;
+
+	UpdateToolBarStatus();
+}
+
+#endif
 
 void BreakpointsWindow::AddBreakpointsForFile(Project::File* file)
 {

@@ -219,7 +219,13 @@ void CodeEdit::SetLuaLexer()
         "and       break     do        else      elseif "
         "end       false     for       function  if "
         "in        local     nil       not       or "
+#ifdef _KOOK_DECODA_
+        "repeat    return    then      true      until     while "
+		"continue self this super include new delete namespace "
+		"class switch case fn elif var let as define ";
+#else
         "repeat    return    then      true      until     while ";
+#endif
 
     SetKeyWords(1, keywords);
 
@@ -626,7 +632,13 @@ bool CodeEdit::GetTokenFromPosition(int position, const wxString& joiners, wxStr
 
         wxString text = GetLine(LineFromPosition(position));
 
+#ifdef _KOOK_DECODA_
+		wxUChar ch = (wxUChar)text[seek];
+
+        if (!isalnum(ch) && joiners.Find(ch) == wxNOT_FOUND)
+#else
         if (!isalnum(text[seek]) && joiners.Find(text[seek]) == wxNOT_FOUND)
+#endif
         {
             return false;
         }

@@ -35,6 +35,10 @@ along with Decoda.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "res/explorer.xpm"
 #include "res/filter_bitmap.xpm"
+#ifdef _KOOK_DECODA_
+#include "res/folder.xpm"
+#include "res/folder_open.xpm"
+#endif
 
 DECLARE_EVENT_TYPE( wxEVT_TREE_CONTEXT_MENU, -1 )
 
@@ -87,6 +91,12 @@ ProjectExplorerWindow::ProjectExplorerWindow(wxWindow* parent, wxWindowID winid)
 
     wxImageList* imageList = new wxImageList(18, 17);
     imageList->Add(bitmap, wxColour(0xFF, 0x9B, 0x77));
+#ifdef _KOOK_DECODA_
+	wxBitmap bitmap_folder(folder_xpm, wxBITMAP_TYPE_XPM);
+	imageList->Add(bitmap_folder, wxColour(0xFF, 0x9B, 0x77));
+	wxBitmap bitmap_folder_open(folder_open_xpm, wxBITMAP_TYPE_XPM);
+	imageList->Add(bitmap_folder_open, wxColour(0xFF, 0x9B, 0x77));
+#endif
 
     m_root = 0;
 
@@ -155,6 +165,10 @@ void ProjectExplorerWindow::SetFocusToFilter()
 
 void ProjectExplorerWindow::SetProject(Project* project)
 {
+#ifdef _KOOK_DECODA_
+	if (project == m_project)
+		return;
+#endif
     m_project = project;
     Rebuild();
 }
@@ -206,17 +220,37 @@ void ProjectExplorerWindow::Rebuild()
     m_tree->Freeze();
 
     m_tree->DeleteAllItems();
+#ifdef _KOOK_DECODA_
+	wxTreeItemId root = m_tree->AddRoot("Root");
+	m_root = m_tree->AppendItem(root, "", Image_Path, Image_Path, NULL);
+#else
     m_root = m_tree->AddRoot("Root");
+#endif
 
     if (m_project != NULL)
     {
-        for (unsigned int i = 0; i < m_project->GetNumFiles(); ++i)
+#ifdef _KOOK_DECODA_
+		for (unsigned int i = 0; i < m_project->GetNumPaths(); ++i)
+		{
+			RebuildForPath(m_project->GetPath(i), m_tree->GetRootItem());
+		}
+		for (unsigned int i = 0; i < m_project->GetNumFiles(); ++i)
+		{
+			RebuildForFile(m_project->GetFile(i));
+		}
+#else
+		for (unsigned int i = 0; i < m_project->GetNumFiles(); ++i)
         {
             RebuildForFile(m_project->GetFile(i));
         }
+#endif
     }
 
+#ifdef _KOOK_DECODA_
+	m_tree->SortChildren(m_root);
+#else
     m_tree->SortChildren(m_tree->GetRootItem());
+#endif
 
     // For whatever reason the unselect event isn't reported properly
     // after deleting all items, so explicitly clear out the info box.
@@ -293,6 +327,124 @@ void ProjectExplorerWindow::RebuildForFile(Project::File* file)
 
 }
 
+#ifdef _KOOK_DECODA_
+void ProjectExplorerWindow::UpdateForFile(wxTreeItemId node, Project::File* file)
+{
+	int image = GetImageForFile(file);
+	m_tree->SetItemImage(node, image, wxTreeItemIcon_Normal);
+	m_tree->SetItemImage(node, image, wxTreeItemIcon_Selected);
+}
+
+bool ProjectExplorerWindow::UpdatePathFile(wxTreeItemId node, Project::File* file)
+{
+	Project::Path* path = file->path;
+	ItemData* data = static_cast<ItemData*>(m_tree->GetItemData(node));
+
+	if (data != NULL && data->type == 0 && data->file == file) {
+		UpdateForFile(node, file);
+		return true;
+	}
+
+	wxTreeItemIdValue cookie;
+	wxTreeItemId child = m_tree->GetFirstChild(node, cookie);
+
+	while (child.IsOk())
+	{
+		data = static_cast<ItemData*>(m_tree->GetItemData(child));
+		if (UpdatePathFile(child, file))
+			return true;
+
+		child = m_tree->GetNextChild(node, cookie);
+	}
+
+	return false;
+}
+
+void ProjectExplorerWindow::RebuildForPath(Project::Path* path, wxTreeItemId root)
+{
+	ItemData* data = new ItemData;
+	data->type = 1;
+	data->path = path;
+	wxTreeItemId node = m_tree->AppendItem(root, path->GetDisplayName(), Image_Path, Image_Path, data);
+	m_tree->SetItemImage(node, Image_PathOpen, wxTreeItemIcon_Expanded);
+	m_tree->SetItemImage(node, Image_PathOpen, wxTreeItemIcon_SelectedExpanded);
+
+	int count = path->paths.size();
+	Project::Path* subpath;
+	for (int i = 0; i < count; i++) {
+		subpath = path->paths[i];
+
+		RebuildForPath(subpath, node);
+	}
+
+	bool matchesFlags;
+	count = path->files.size();
+	Project::File* file;
+	for (int i = 0; i < count; i++) {
+		file = path->files[i];
+
+		matchesFlags = false;
+		if ((m_filterFlags & FilterFlag_Unversioned) && file->status == Project::Status_None)
+		{
+			matchesFlags = !file->temporary;
+		}
+
+		if ((m_filterFlags & FilterFlag_CheckedIn) && file->status == Project::Status_CheckedIn)
+		{
+			matchesFlags = true;
+		}
+
+		if ((m_filterFlags & FilterFlag_CheckedOut) && file->status == Project::Status_CheckedOut)
+		{
+			matchesFlags = true;
+		}
+
+		if ((m_filterFlags & FilterFlag_Temporary) && file->temporary)
+		{
+			matchesFlags = true;
+		}
+
+		if (matchesFlags)
+		{
+			if (m_filter.IsEmpty())
+			{
+				// Just include the files like the standard Visual Studio project view.
+				AddFile(node, file);
+			}
+			else
+			{
+
+				// Filter all of the symbols, modules and file name.
+
+				// Check to see if the file name matches the filter.
+				if (MatchesFilter(file->fileName.GetFullName(), m_filter))
+				{
+					AddFile(node, file);
+				}
+
+				for (unsigned int j = 0; j < file->symbols.size(); ++j)
+				{
+
+					Symbol* symbol = file->symbols[j];
+
+					// Check to see if the symbol matches the filter.
+					if (MatchesFilter(symbol->name, m_filter))
+					{
+						AddSymbol(node, file, symbol);
+					}
+
+				}
+
+			}
+		}
+	}
+
+	if (path->status == Project::PathStatus_Expand) {
+		m_tree->Expand(node);
+	}
+}
+#endif
+
 bool ProjectExplorerWindow::MatchesFilter(const wxString& string, const wxString& filter) const
 {
 
@@ -326,6 +478,9 @@ void ProjectExplorerWindow::AddFile(wxTreeItemId parent, Project::File* file)
 {
 
     ItemData* data = new ItemData;
+#ifdef _KOOK_DECODA_
+	data->type		= 0;
+#endif
     data->file      = file;
     data->symbol    = NULL;
 
@@ -370,6 +525,9 @@ void ProjectExplorerWindow::AddSymbol(wxTreeItemId parent, Project::File* file, 
 {
 
     ItemData* data = new ItemData;
+#ifdef _KOOK_DECODA_
+	data->type		= 0;
+#endif
     data->file      = file;
     data->symbol    = symbol;
 
@@ -386,6 +544,16 @@ void ProjectExplorerWindow::AddSymbol(wxTreeItemId parent, Project::File* file, 
 
 void ProjectExplorerWindow::OnTreeItemExpanding(wxTreeEvent& event)
 {
+#ifdef _KOOK_DECODA_
+	ItemData* data = (ItemData*)m_tree->GetItemData(event.GetItem());
+
+	if (data && data->type == 1 && data->path) {
+		m_project->SetPathStatus(data->path, Project::PathStatus_Expand);
+		m_stopExpansion = 0;
+		return;
+	}
+#endif
+
     if (event.GetItem() == m_stopExpansion)
     {
         event.Veto();
@@ -395,6 +563,15 @@ void ProjectExplorerWindow::OnTreeItemExpanding(wxTreeEvent& event)
 
 void ProjectExplorerWindow::OnTreeItemCollapsing(wxTreeEvent& event)
 {
+#ifdef _KOOK_DECODA_
+	ItemData* data = (ItemData*)m_tree->GetItemData(event.GetItem());
+
+	if (data && data->type == 1 && data->path) {
+		m_project->SetPathStatus(data->path, Project::PathStatus_None);
+		m_stopExpansion = 0;
+		return;
+	}
+#endif
     if (event.GetItem() == m_stopExpansion)
     {
         event.Veto();
@@ -459,18 +636,39 @@ void ProjectExplorerWindow::OnTreeItemSelectionChanged(wxTreeEvent& event)
         m_tree->SelectItem(item);
         ItemData* itemData = GetDataForItem(item);
 
+#ifdef _KOOK_DECODA_
+		if (itemData)
+			switch (itemData->type) {
+			case 0:
+				if (itemData->file != NULL)
+				{
+					file = itemData->file;
+					m_infoBox->SetFile(file);
+				}
+				break;
+			case 1:
+				if (itemData->path != NULL)
+				{
+					m_infoBox->SetPath(itemData->path);
+				}
+				break;
+			}
+#else
         if (itemData != NULL && itemData->file != NULL)
         {
             file = itemData->file;
         }
 
+#endif
     }
     else
     {
         int a = 0;
     }
 
-    m_infoBox->SetFile(file);
+#ifndef _KOOK_DECODA_
+	m_infoBox->SetFile(file);
+#endif
 
 }
 
@@ -496,14 +694,25 @@ void ProjectExplorerWindow::GetSelectedFiles(std::vector<Project::File*>& select
 
 void ProjectExplorerWindow::InsertFile(Project::File* file)
 {
+#ifdef _KOOK_DECODA_
+	if (file->path)
+		return;
+#endif
     RebuildForFile(file);
-    m_tree->SortChildren(m_tree->GetRootItem());
+#ifdef _KOOK_DECODA_
+    m_tree->SortChildren(m_root);
+#else
+	m_tree->SortChildren(m_tree->GetRootItem());
+#endif
 }
 
 void ProjectExplorerWindow::RemoveFile(Project::File* file)
 {
-
+#ifdef _KOOK_DECODA_
+    RemoveFileSymbols(m_root, file);
+#else
     RemoveFileSymbols(m_tree->GetRootItem(), file);
+#endif
 
     if (m_infoBox->GetFile() == file)
     {
@@ -522,7 +731,11 @@ void ProjectExplorerWindow::RemoveFiles(const std::vector<Project::File*>& files
         fileSet.insert(files[i]);
     }
 
+#ifdef _KOOK_DECODA_
+	RemoveFileSymbols(m_root, fileSet);
+#else
     RemoveFileSymbols(m_tree->GetRootItem(), fileSet);
+#endif
 
 }
 
@@ -559,7 +772,11 @@ void ProjectExplorerWindow::RemoveFileSymbols(wxTreeItemId node, const stdext::h
 
     ItemData* data = static_cast<ItemData*>(m_tree->GetItemData(node));
 
-    if (data != NULL && fileSet.find(data->file) != fileSet.end())
+#ifdef _KOOK_DECODA_
+    if (data != NULL && data->type == 0 && fileSet.find(data->file) != fileSet.end())
+#else
+	if (data != NULL && fileSet.find(data->file) != fileSet.end())
+#endif
     {
         m_tree->Delete(node);
     }
@@ -586,6 +803,26 @@ void ProjectExplorerWindow::SetFileContextMenu(wxMenu* contextMenu)
 {
     m_contextMenu = contextMenu;
 }
+
+#ifdef _KOOK_DECODA_
+void ProjectExplorerWindow::InsertPath(Project::Path* path)
+{
+	RebuildForPath(path, m_tree->GetRootItem());
+}
+
+void ProjectExplorerWindow::ExpandPathItem(wxTreeItemId node)
+{
+	ItemData* data = (ItemData*)m_tree->GetItemData(node);
+	if (data && data->type == 1 && data->path)
+	{
+		if (!m_tree->IsExpanded(node))
+			m_tree->Expand(node);
+		else
+			m_tree->Collapse(node);
+	}
+		
+}
+#endif
 
 int ProjectExplorerWindow::GetImageForFile(const Project::File* file) const
 {
@@ -677,10 +914,21 @@ void ProjectExplorerWindow::UpdateFile(Project::File* file)
 
     m_tree->Freeze();
 
+#ifdef _KOOK_DECODA_
+	if (file->path) {
+		UpdatePathFile(m_tree->GetRootItem(), file);
+	}
+	else {
+		RemoveFileSymbols(m_root, file);
+		RebuildForFile(file);
+	}
+	m_tree->SortChildren(m_root);
+#else
     RemoveFileSymbols(m_tree->GetRootItem(), file);
     RebuildForFile(file);
-
-    m_tree->SortChildren(m_tree->GetRootItem());
+	m_tree->SortChildren(m_tree->GetRootItem());
+#endif
+    
 
     m_tree->Thaw();
 

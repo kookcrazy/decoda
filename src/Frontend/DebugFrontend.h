@@ -46,6 +46,9 @@ public:
     {
         std::string     name;       // Identifying name of the script (usually a file name)
         std::string     source;     // Source code for the script
+#ifdef _KOOK_DECODA_
+		std::string		filename;
+#endif
         CodeState       state;
         LineMapper      lineMapper; // Current mapping from lines in the local file to backend script lines.
     };
@@ -137,6 +140,10 @@ public:
      * is a function this will step into the function.
      */
     void StepInto(unsigned int vm);
+
+#ifdef _KOOK_DECODA_
+	void StepOut(unsigned int vm);
+#endif
 
     /**
      * Signals to the debugger that we've finished the processing we needed to
