@@ -1,4 +1,4 @@
-# Decoda
+# Decoda@k
 Lua IDE and Debuger
 
 原项目：https://github.com/unknownworlds/decoda
