@@ -1,5 +1,5 @@
 # Decoda@k
-Lua IDE and Debuger
+Lua IDE and Debuger by Kook
 
 原项目：https://github.com/unknownworlds/decoda
 
