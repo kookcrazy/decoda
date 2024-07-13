@@ -4,7 +4,7 @@ solution "Decoda"
 	--debugdir "working"
 	flags { "No64BitChecks" }
     
-	defines { "_CRT_SECURE_NO_WARNINGS", "WIN32" }
+	defines { "_CRT_SECURE_NO_WARNINGS", "WIN32", "_KOOK_DECODA_" }
     
     vpaths { 
         ["Header Files"] = { "**.h" },
