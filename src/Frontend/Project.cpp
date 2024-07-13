@@ -1559,8 +1559,8 @@ bool Project::LoadGeneralSettings(const wxString& fileName)
     while (node != NULL)
     {
 #ifdef _KOOK_DECODA_
-		LoadFileNode(baseDirectory, node)
-		|| LoadPathNode(baseDirectory, node)
+        LoadFileNode(baseDirectory, node)
+        || LoadPathNode(baseDirectory, node);
 #else
         LoadFileNode(baseDirectory, node);
 #endif

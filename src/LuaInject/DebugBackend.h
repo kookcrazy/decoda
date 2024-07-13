@@ -31,8 +31,15 @@ along with Decoda.  If not, see <http://www.gnu.org/licenses/>.
 #include <vector>
 #include <string>
 #include <list>
+#ifdef _KOOK_DECODA_
+#include <unordered_map>
+#include <unordered_set>
+#define HASH_MAP std::unordered_map
+#define HASH_SET std::unordered_set
+#else
 #include <hash_set>
 #include <hash_map>
+#endif
 
 //
 // Forward declarations.
@@ -438,9 +445,6 @@ private:
         bool            luaJitWorkAround;
         bool            breakpointInStack;
         bool            haveActiveBreakpoints;
-#ifdef _KOOK_DECODA_
-		bool			hadBreaked;
-#endif
         std::string     lastFunctions;
     };
 
@@ -613,8 +617,13 @@ private:
 #endif
 private:
 
+#ifdef _KOOK_DECODA_
+    typedef HASH_MAP<lua_State*, VirtualMachine*>   StateToVmMap;
+    typedef HASH_MAP<std::string, unsigned int>     NameToScriptMap;
+#else
     typedef stdext::hash_map<lua_State*, VirtualMachine*>   StateToVmMap;
     typedef stdext::hash_map<std::string, unsigned int>     NameToScriptMap;
+#endif
 
     static DebugBackend*            s_instance;
     static const unsigned int       s_maxStackSize  = 100;
@@ -642,7 +651,11 @@ private:
     StateToVmMap                    m_stateToVm;
     
     mutable CriticalSection         m_exceptionCriticalSection; // Controls access to ignoreExceptions 
+#ifdef _KOOK_DECODA_
+    HASH_SET<std::string>           m_ignoreExceptions;
+#else
     stdext::hash_set<std::string>   m_ignoreExceptions;
+#endif
 
     std::vector<Api>                m_apis;
 

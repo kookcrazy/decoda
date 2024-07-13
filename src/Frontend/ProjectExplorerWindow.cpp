@@ -31,7 +31,12 @@ along with Decoda.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <wx/file.h>
 #include <wx/listctrl.h>
+#ifdef _KOOK_DECODA_
+#include <unordered_map>
+#define HASH_MAP std::unordered_map
+#else
 #include <hash_map>
+#endif
 
 #include "res/explorer.xpm"
 #include "res/filter_bitmap.xpm"
@@ -490,7 +495,11 @@ void ProjectExplorerWindow::AddFile(wxTreeItemId parent, Project::File* file)
 
     // Add the symbols.
 
+#ifdef _KOOK_DECODA_
+    HASH_MAP<std::string, wxTreeItemId> groups;
+#else
     stdext::hash_map<std::string, wxTreeItemId> groups;
+#endif
 
     for (unsigned int i = 0; i < file->symbols.size(); ++i)
     {
@@ -500,7 +509,11 @@ void ProjectExplorerWindow::AddFile(wxTreeItemId parent, Project::File* file)
         if (!file->symbols[i]->module.IsEmpty())
         {
 
+#ifdef _KOOK_DECODA_
+            HASH_MAP<std::string, wxTreeItemId>::const_iterator iterator;
+#else
             stdext::hash_map<std::string, wxTreeItemId>::const_iterator iterator;
+#endif
             iterator = groups.find(file->symbols[i]->module.ToAscii());
 
             if (iterator == groups.end())
@@ -723,8 +736,11 @@ void ProjectExplorerWindow::RemoveFile(Project::File* file)
 
 void ProjectExplorerWindow::RemoveFiles(const std::vector<Project::File*>& files)
 {
-
+#ifdef _KOOK_DECODA_
+    HASH_SET<Project::File*> fileSet;
+#else
     stdext::hash_set<Project::File*> fileSet;
+#endif
 
     for (unsigned int i = 0; i < files.size(); ++i)
     {
@@ -767,7 +783,11 @@ void ProjectExplorerWindow::RemoveFileSymbols(wxTreeItemId node, Project::File* 
     
 }
 
+#ifdef _KOOK_DECODA_
+void ProjectExplorerWindow::RemoveFileSymbols(wxTreeItemId node, const HASH_SET<Project::File*>& fileSet)
+#else
 void ProjectExplorerWindow::RemoveFileSymbols(wxTreeItemId node, const stdext::hash_set<Project::File*>& fileSet)
+#endif
 {
 
     ItemData* data = static_cast<ItemData*>(m_tree->GetItemData(node));

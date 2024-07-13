@@ -35,8 +35,15 @@ along with Decoda.  If not, see <http://www.gnu.org/licenses/>.
 #include <malloc.h>
 #include <assert.h>
 #include <set>
+#ifdef _KOOK_DECODA_
+#include <unordered_map>
+#include <unordered_set>
+#define HASH_MAP std::unordered_map
+#define HASH_SET std::unordered_set
+#else
 #include <hash_map>
 #include <hash_set>
+#endif
 
 // Macro for convenient pointer addition.
 // Essentially treats the last two parameters as DWORDs.  The first
@@ -548,10 +555,17 @@ std::set<std::string>           g_loadedModules;
 CriticalSection                 g_loadedModulesCriticalSection;
 
 std::vector<LuaInterface>       g_interfaces;
+#ifdef _KOOK_DECODA_
+HASH_MAP<void*, void*>          g_hookedFunctionMap;
+
+HASH_SET<std::string>           g_warnedAboutLua;   // Indivates that we've warned the module contains Lua functions but none were loaded.
+HASH_SET<std::string>           g_warnedAboutPdb;   // Indicates that we've warned about a module having a mismatched PDB.
+#else
 stdext::hash_map<void*, void*>  g_hookedFunctionMap;
 
 stdext::hash_set<std::string>   g_warnedAboutLua;   // Indivates that we've warned the module contains Lua functions but none were loaded.
 stdext::hash_set<std::string>   g_warnedAboutPdb;   // Indicates that we've warned about a module having a mismatched PDB.
+#endif
 bool                            g_warnedAboutThreads = false;
 bool                            g_warnedAboutJit     = false;
 
@@ -3866,19 +3880,23 @@ std::string GetApplicationDirectory()
 
 }
 
+#ifdef _KOOK_DECODA_
+bool LoadLuaFunctions(const HASH_MAP<std::string, DWORD64>& symbols, HANDLE hProcess)
+#else
 bool LoadLuaFunctions(const stdext::hash_map<std::string, DWORD64>& symbols, HANDLE hProcess)
+#endif
 {
 
+#ifdef _KOOK_DECODA_
     #define GET_FUNCTION_OPTIONAL(function)                                                                                     \
         {                                                                                                                       \
-            stdext::hash_map<std::string, DWORD64>::const_iterator iterator = symbols.find(#function);                          \
+            HASH_MAP<std::string, DWORD64>::const_iterator iterator = symbols.find(#function);                          \
             if (iterator != symbols.end())                                                                                      \
             {                                                                                                                   \
                 luaInterface.function##_dll_cdecl = reinterpret_cast<function##_cdecl_t>(iterator->second);                     \
             } \
         }
 
-#ifdef _KOOK_DECODA_
 	#define GET_FUNCTION_OPTIONAL2(function, name)                                                                                     \
         {                                                                                                                       \
             HASH_MAP<std::string, DWORD64>::const_iterator iterator = symbols.find(#name);                          \
@@ -3886,6 +3904,15 @@ bool LoadLuaFunctions(const stdext::hash_map<std::string, DWORD64>& symbols, HAN
             {                                                                                                                   \
                 luaInterface.function##_dll_cdecl = reinterpret_cast<function##_cdecl_t>(iterator->second);                     \
             }                                                                                                                   \
+        }
+#else
+    #define GET_FUNCTION_OPTIONAL(function)                                                                                     \
+        {                                                                                                                       \
+            stdext::hash_map<std::string, DWORD64>::const_iterator iterator = symbols.find(#function);                          \
+            if (iterator != symbols.end())                                                                                      \
+            {                                                                                                                   \
+                luaInterface.function##_dll_cdecl = reinterpret_cast<function##_cdecl_t>(iterator->second);                     \
+            } \
         }
 #endif
 
@@ -3900,17 +3927,24 @@ bool LoadLuaFunctions(const stdext::hash_map<std::string, DWORD64>& symbols, HAN
             return false;                                                                                                       \
         }
 
+#ifdef _KOOK_DECODA_
     #define HOOK_FUNCTION(function)                                                                                             \
         if (luaInterface.function##_dll_cdecl != NULL)                                                                          \
         {                                                                                                                       \
             void* original = luaInterface.function##_dll_cdecl;                                                                 \
             luaInterface.function##_dll_cdecl = (function##_cdecl_t)(HookFunction(original, function##_intercept, api));        \
-        }		
-#ifdef _KOOK_DECODA_																												\
+        }																												        \
 		else if (report)                                                                                                        \
 		{																														\
 			DebugBackend::Get().Message("Warning 1005: Couldn't hook Lua function '" #function "'", MessageType_Warning);		\
 		}
+#else
+    #define HOOK_FUNCTION(function)                                                                                             \
+        if (luaInterface.function##_dll_cdecl != NULL)                                                                          \
+        {                                                                                                                       \
+            void* original = luaInterface.function##_dll_cdecl;                                                                 \
+            luaInterface.function##_dll_cdecl = (function##_cdecl_t)(HookFunction(original, function##_intercept, api));        \
+        }
 #endif
 
     LuaInterface luaInterface = { 0 };
@@ -4412,7 +4446,11 @@ bool LocateSymbolFile(const IMAGEHLP_MODULE64& moduleInfo, char fileName[_MAX_PA
 BOOL CALLBACK GatherSymbolsCallback(PSYMBOL_INFO pSymInfo, ULONG SymbolSize, PVOID UserContext)
 {
     
+#ifdef _KOOK_DECODA_
+    HASH_MAP<std::string, DWORD64>* symbols = reinterpret_cast<HASH_MAP<std::string, DWORD64>*>(UserContext);
+#else
     stdext::hash_map<std::string, DWORD64>* symbols = reinterpret_cast<stdext::hash_map<std::string, DWORD64>*>(UserContext);
+#endif
 
     if (pSymInfo != NULL && pSymInfo->Name != NULL)
     {
@@ -4459,7 +4497,11 @@ bool ScanForSignature(DWORD64 start, DWORD64 length, const char* signature)
 
 }
 
+#ifdef _KOOK_DECODA_
+void LoadSymbolsRecursively(std::set<std::string>& loadedModules, HASH_MAP<std::string, DWORD64>& symbols, HANDLE hProcess, HMODULE hModule)
+#else
 void LoadSymbolsRecursively(std::set<std::string>& loadedModules, stdext::hash_map<std::string, DWORD64>& symbols, HANDLE hProcess, HMODULE hModule)
+#endif
 {
 
     assert(hModule != NULL);
@@ -4668,7 +4710,11 @@ void PostLoadLibrary(HMODULE hModule)
         //SymSetOptions(SYMOPT_DEBUG);
 
         std::set<std::string> loadedModules;
+#ifdef _KOOK_DECODA_
+        HASH_MAP<std::string, DWORD64> symbols;
+#else
         stdext::hash_map<std::string, DWORD64> symbols;
+#endif
 
         LoadSymbolsRecursively(loadedModules, symbols, hProcess, hModule);
 

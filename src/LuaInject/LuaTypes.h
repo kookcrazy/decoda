@@ -132,7 +132,7 @@ extern "C"
 
 #ifdef _KOOK_DECODA_
 	typedef ptrdiff_t lua_KContext;
-#ifdef _KOOK_DECODA_
+#endif
 
 	struct lua_State;
 	typedef void * (*lua_Alloc) (void *ud, void *ptr, size_t osize, size_t nsize);

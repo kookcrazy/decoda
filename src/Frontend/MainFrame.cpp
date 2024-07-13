@@ -77,7 +77,12 @@ along with Decoda.  If not, see <http://www.gnu.org/licenses/>.
 #include <shlobj.h>
 
 #include <algorithm>
+#ifdef _KOOK_DECODA_
+#include <unordered_map>
+#define HASH_MAP std::unordered_map
+#else
 #include <hash_map>
+#endif
 
 
 // Event used to communicate when the update data has been downloaded.
@@ -5495,7 +5500,11 @@ void MainFrame::OnThreadExit(ThreadEvent& event)
     // the project files in linear time.
 
     FileStatusThread* thread = m_fileStatusThread[0];
+#ifdef _KOOK_DECODA_
+    HASH_MAP<std::string, SourceControl::Status> statusMap;
+#else
     stdext::hash_map<std::string, SourceControl::Status> statusMap;
+#endif
 
     for (unsigned int i = 0; i < thread->GetNumFiles(); ++i)
     {
@@ -5507,7 +5516,11 @@ void MainFrame::OnThreadExit(ThreadEvent& event)
 
         Project::File* file = m_project->GetFile(i);
 
+#ifdef _KOOK_DECODA_
+        HASH_MAP<std::string, SourceControl::Status>::iterator iterator;
+#else
         stdext::hash_map<std::string, SourceControl::Status>::iterator iterator;
+#endif
         iterator = statusMap.find(std::string(file->fileName.GetFullPath()));
 
         if (iterator != statusMap.end())

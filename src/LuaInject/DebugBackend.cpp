@@ -356,7 +356,6 @@ DebugBackend::VirtualMachine* DebugBackend::AttachState(unsigned long api, lua_S
     vm->breakpointInStack   = true;// Force the stack tobe checked when the first script is entered
     vm->haveActiveBreakpoints = false;
 #ifdef _KOOK_DECODA_
-	vm->hadBreaked = false;
 	vm->lastStepSource		= NULL;
 #endif
     
@@ -809,7 +808,6 @@ void DebugBackend::HookCallback(unsigned long api, lua_State* L, lua_Debug* ar)
     //Only try to downgrade the hook when the debugger is not stepping   
     if(m_mode == Mode_Continue)
     {
-		vm->hadBreaked = false;
         UpdateHookMode(api, L, ar);
     }
     else
@@ -838,7 +836,6 @@ void DebugBackend::HookCallback(unsigned long api, lua_State* L, lua_Debug* ar)
 			break;
 		case Mode_StepOut:
 			if (vm->callCount <= 0) {
-				vm->hadBreaked = true;
 				stop = true;
 			}
 			break;
@@ -904,7 +901,6 @@ void DebugBackend::HookCallback(unsigned long api, lua_State* L, lua_Debug* ar)
 					// Check to see if we're on a breakpoint and should break.
 					if (!onLastStepLine && m_scripts[scriptIndex]->GetHasBreakPoint(GetCurrentLine(api, ar) - 1))
 					{
-						vm->hadBreaked = true;
 						stop = true;
 					}
 				}
@@ -1096,29 +1092,12 @@ void DebugBackend::UpdateHookMode(unsigned long api, lua_State* L, lua_Debug* ho
 		Script* script = scriptIndex != -1 ? m_scripts[scriptIndex] : NULL;
 
 		int lastlinedefined = GetLastLineDefined(api, hookEvent);
-		/*
-		if(script != NULL && (script->HasBreakPointInRange(linedefined, lastlinedefined) ||
-		//Check if the function is the top level chunk of a script because they always have there lastlinedefined set to 0
-		(script->HasBreakpointsActive() && linedefined == 0 && lastlinedefined == 0)))*/
 		if (script && script->HasBreakpointsActive() && (
 			(linedefined == 0 && lastlinedefined == 0) || script->HasBreakPointInRange(linedefined, lastlinedefined)
 			))
 		{
 			mode = HookMode_Full;
 			vm->breakpointInStack = true;
-		}
-	}
-
-	//Keep the hook in Full mode while theres a function in the stack somewhere that has a breakpoint in it
-	if (0)//mode != HookMode_Full && vm->breakpointInStack)
-	{
-		if (StackHasBreakpoint(api, L))
-		{
-			mode = HookMode_Full;
-		}
-		else
-		{
-			vm->breakpointInStack = false;
 		}
 	}
 
