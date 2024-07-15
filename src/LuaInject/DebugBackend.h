@@ -36,9 +36,10 @@ along with Decoda.  If not, see <http://www.gnu.org/licenses/>.
 #include <unordered_set>
 #define HASH_MAP std::unordered_map
 #define HASH_SET std::unordered_set
+#include <stack>
 #else
-#include <hash_set>
 #include <hash_map>
+#include <hash_set>
 #endif
 
 //
@@ -437,7 +438,8 @@ private:
         int             lastStepLine;
         int             lastStepScript;
 #ifdef _KOOK_DECODA_
-		const char*		lastStepSource;
+		    const char*		  lastStepSource;
+        std::stack<int> breakStack;
 #endif
         unsigned long   api;
         std::string     name;

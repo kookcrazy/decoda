@@ -43,6 +43,9 @@ void            lua_settable_dll        (unsigned long api, lua_State*, int);
 void            lua_gettable_dll        (unsigned long api, lua_State*, int);
 void            lua_rawget_dll          (unsigned long api, lua_State*, int idx);
 void            lua_rawgeti_dll         (unsigned long api, lua_State*, int idx, int n);
+#ifdef _KOOK_DECODA_
+void            lua_rawgeti_540_dll     (unsigned long api, lua_State*, int idx, lua_Integer540 n);
+#endif
 void            lua_rawset_dll          (unsigned long api, lua_State* L, int index);
 void            lua_pushstring_dll      (unsigned long api, lua_State*, const char*);
 void            lua_pushlstring_dll     (unsigned long api, lua_State*, const char*, size_t);

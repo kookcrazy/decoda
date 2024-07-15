@@ -132,6 +132,7 @@ extern "C"
 
 #ifdef _KOOK_DECODA_
 	typedef ptrdiff_t lua_KContext;
+  typedef	long long lua_Integer540;
 #endif
 
 	struct lua_State;

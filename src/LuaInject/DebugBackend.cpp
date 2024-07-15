@@ -83,7 +83,15 @@ bool DebugBackend::Script::GetHasBreakPoint(unsigned int line) const
 
 bool DebugBackend::Script::HasBreakPointInRange(unsigned int start, unsigned int end) const
 {
-    
+#ifdef _KOOK_DECODA_
+    int size = breakpoints.size();
+    if (size == 0)
+        return false;
+    if (size == 1)
+        return breakpoints[0] >= start && breakpoints[0] < end;
+    if (end <= breakpoints[0] || start > breakpoints[size - 1])
+        return false;
+#endif
     for (size_t i = 0; i < breakpoints.size(); i++)
     {
         if(breakpoints[i] >= start && breakpoints[i] < end)
@@ -91,7 +99,6 @@ bool DebugBackend::Script::HasBreakPointInRange(unsigned int start, unsigned int
             return true;
         }
     }
-    
     return false;
 }
 
@@ -805,6 +812,138 @@ void DebugBackend::HookCallback(unsigned long api, lua_State* L, lua_Debug* ar)
     // Log for debugging.
     //LogHookEvent(api, L, ar);
 
+#ifdef _KOOK_DECODA_
+    int arevent = GetEvent(api, ar);
+    if (arevent == LUA_HOOKLINE)
+    {
+      bool stop = false;
+      bool onLastStepLine = false;
+      bool check = true;
+      int scriptIndex;
+
+      switch (m_mode) {
+      case Mode_StepInto:
+        stop = true;
+        break;
+      case Mode_StepOut:
+        if (vm->callCount <= 0) {
+          stop = true;
+        }
+        break;
+      case Mode_StepOver:
+        if (vm->callCount <= 0) {
+          stop = true;
+        }
+        break;
+      }
+
+      while (check || stop) {
+        lua_getinfo_dll(api, L, "Sl", ar);
+        const char* arsource = GetSource(api, ar);
+
+        if (arsource == vm->lastStepSource)
+          scriptIndex = vm->lastStepScript;
+        else
+          scriptIndex = GetScriptIndex(arsource);
+
+        if (scriptIndex == -1)
+        {
+          if (m_mode != Mode_StepInto) {
+            vm->lastStepScript = scriptIndex;
+            vm->lastStepSource = arsource;
+            break;
+          }
+          scriptIndex = RegisterScript(api, L, ar);
+        }
+
+        if (scriptIndex != -1)
+        {
+          vm->lastStepScript = scriptIndex;
+          vm->lastStepSource = arsource;
+        }
+
+        if (vm->luaJitWorkAround)
+        {
+          int stackDepth = GetStackDepth(api, L);
+
+          //We will get multiple line events for the same line in LuaJIT if there are only calls to C functions on the line 
+          if (vm->lastStepLine == GetCurrentLine(api, ar))
+          {
+            onLastStepLine = vm->lastStepScript == scriptIndex && vm->callStackDepth != 0 && stackDepth == vm->callStackDepth;
+          }
+
+          // If we're stepping on each line or we just stepped out of a function that
+          // we were stepping over, break.
+          if (m_mode == Mode_StepOver && vm->callStackDepth > 0)
+          {
+            if (stackDepth < vm->callStackDepth || (stackDepth == vm->callStackDepth && !onLastStepLine))
+            {
+              // We've returned to the level when the function was called.
+              vm->callCount = 0;
+              vm->callStackDepth = 0;
+            }
+          }
+        }
+
+        if (!stop)
+        {
+          if (scriptIndex != -1)
+          {
+            // Check to see if we're on a breakpoint and should break.
+            if (!onLastStepLine && m_scripts[scriptIndex]->GetHasBreakPoint(GetCurrentLine(api, ar) - 1))
+            {
+              stop = true;
+            }
+          }
+        }
+        break;
+      }
+
+      m_criticalSection.Exit();
+
+      if (stop)
+      {
+        BreakFromScript(api, L);
+
+        if (vm->luaJitWorkAround)
+        {
+          vm->callStackDepth = GetStackDepth(api, L);
+          vm->lastStepLine = GetCurrentLine(api, ar);
+        }
+      }
+    }
+    else
+    {
+      if (m_mode == Mode_Continue)
+      {
+        UpdateHookMode(api, L, ar);
+      }
+      else
+      {
+        UpdateHookMode(api, L, ar);
+        if (GetHookMode(api, L) != HookMode_Full)
+        {
+          SetHookMode(api, L, HookMode_Full);
+        }
+      }
+      if (m_mode == Mode_StepOver || m_mode == Mode_StepOut)
+      {
+        if (GetIsHookEventTailCall(api, arevent)) // only LUA_HOOKTAILCALL for Lua 5.4
+        {
+        }
+        else if (GetIsHookEventRet(api, arevent)) // only LUA_HOOKRET for Lua 5.2, can also be LUA_HOOKTAILRET for older versions
+        {
+          --vm->callCount;
+        }
+        else if (GetIsHookEventCall(api, arevent)) // only LUA_HOOKCALL for Lua 5.1, can also be LUA_HOOKTAILCALL for newer versions
+        {
+          ++vm->callCount;
+        }
+      }
+      m_criticalSection.Exit();
+    }
+#else
+
     //Only try to downgrade the hook when the debugger is not stepping   
     if(m_mode == Mode_Continue)
     {
@@ -821,121 +960,20 @@ void DebugBackend::HookCallback(unsigned long api, lua_State* L, lua_Debug* ar)
         vm->breakpointInStack = true;
     }
 
-#ifdef _KOOK_DECODA_
-    int arevent = GetEvent(api, ar);
-	if (arevent == LUA_HOOKLINE)
-	{
-		bool stop = false;
-		bool onLastStepLine = false;
-		bool check = true;
-		int scriptIndex;
+	  int arevent = GetEvent(api, ar);
+	  if (arevent == LUA_HOOKLINE)
+	  {
+		    // Fill in the rest of the structure.
+		    lua_getinfo_dll(api, L, "Sl", ar);
+		    const char* arsource = GetSource(api, ar);
 
-		switch (m_mode) {
-		case Mode_StepInto:
-			stop = true;
-			break;
-		case Mode_StepOut:
-			if (vm->callCount <= 0) {
-				stop = true;
-			}
-			break;
-		case Mode_StepOver:
-			if (vm->callCount <= 0) {
-				stop = true;
-			}
-			break;
-		}
+		    int scriptIndex = GetScriptIndex(arsource);
 
-		while (check || stop) {
-			lua_getinfo_dll(api, L, "Sl", ar);
-			const char* arsource = GetSource(api, ar);
-
-			if (arsource == vm->lastStepSource)
-				scriptIndex = vm->lastStepScript;
-			else
-				scriptIndex = GetScriptIndex(arsource);
-
-			if (scriptIndex == -1)
-			{
-				if (m_mode != Mode_StepInto) {
-					vm->lastStepScript = scriptIndex;
-					vm->lastStepSource = arsource;
-					break;
-				}
-				scriptIndex = RegisterScript(api, L, ar);
-			}
-
-			if (scriptIndex != -1)
-			{
-				vm->lastStepScript = scriptIndex;
-				vm->lastStepSource = arsource;
-			}
-
-			if (vm->luaJitWorkAround)
-			{
-				int stackDepth = GetStackDepth(api, L);
-
-				//We will get multiple line events for the same line in LuaJIT if there are only calls to C functions on the line 
-				if (vm->lastStepLine == GetCurrentLine(api, ar))
-				{
-					onLastStepLine = vm->lastStepScript == scriptIndex && vm->callStackDepth != 0 && stackDepth == vm->callStackDepth;
-				}
-
-				// If we're stepping on each line or we just stepped out of a function that
-				// we were stepping over, break.
-				if (m_mode == Mode_StepOver && vm->callStackDepth > 0)
-				{
-					if (stackDepth < vm->callStackDepth || (stackDepth == vm->callStackDepth && !onLastStepLine))
-					{
-						// We've returned to the level when the function was called.
-						vm->callCount = 0;
-						vm->callStackDepth = 0;
-					}
-				}
-			}
-
-			if (!stop)
-			{
-				if (scriptIndex != -1)
-				{
-					// Check to see if we're on a breakpoint and should break.
-					if (!onLastStepLine && m_scripts[scriptIndex]->GetHasBreakPoint(GetCurrentLine(api, ar) - 1))
-					{
-						stop = true;
-					}
-				}
-			}
-			break;
-		}
-
-		m_criticalSection.Exit();
-
-		if (stop)
-		{
-			BreakFromScript(api, L);
-
-			if (vm->luaJitWorkAround)
-			{
-				vm->callStackDepth = GetStackDepth(api, L);
-				vm->lastStepLine = GetCurrentLine(api, ar);
-			}
-		}
-	}
-#else
-	int arevent = GetEvent(api, ar);
-	if (arevent == LUA_HOOKLINE)
-	{
-		// Fill in the rest of the structure.
-		lua_getinfo_dll(api, L, "Sl", ar);
-		const char* arsource = GetSource(api, ar);
-
-		int scriptIndex = GetScriptIndex(arsource);
-
-		if (scriptIndex == -1)
-		{
-			// This isn't a script we've seen before, so tell the debugger about it.
-			scriptIndex = RegisterScript(api, L, ar);
-		}
+		    if (scriptIndex == -1)
+		    {
+			    // This isn't a script we've seen before, so tell the debugger about it.
+			    scriptIndex = RegisterScript(api, L, ar);
+		    }
 
         bool stop = false;
         bool onLastStepLine = false;
@@ -994,25 +1032,9 @@ void DebugBackend::HookCallback(unsigned long api, lua_State* L, lua_Debug* ar)
                 vm->lastStepScript = scriptIndex;
             }
         }
-	}
-#endif
+	  }
     else
     {
-#ifdef _KOOK_DECODA_
-		if (m_mode == Mode_StepOver || m_mode == Mode_StepOut) {
-			if (GetIsHookEventTailCall(api, arevent)) // only LUA_HOOKTAILCALL for Lua 5.4
-			{
-			}
-			else if (GetIsHookEventRet(api, arevent)) // only LUA_HOOKRET for Lua 5.2, can also be LUA_HOOKTAILRET for older versions
-			{
-				--vm->callCount;
-			}
-			else if (GetIsHookEventCall(api, arevent)) // only LUA_HOOKCALL for Lua 5.1, can also be LUA_HOOKTAILCALL for newer versions
-			{
-				++vm->callCount;
-			}
-		}
-#else
         if (m_mode == Mode_StepOver )
         {
             if (GetIsHookEventRet( api, arevent)) // only LUA_HOOKRET for Lua 5.2, can also be LUA_HOOKTAILRET for older versions
@@ -1030,12 +1052,11 @@ void DebugBackend::HookCallback(unsigned long api, lua_State* L, lua_Debug* ar)
                 }
             }
         }
-#endif
 
         m_criticalSection.Exit(); 
     
     }
-
+#endif
 }
 
 void DebugBackend::UpdateHookMode(unsigned long api, lua_State* L, lua_Debug* hookEvent)
@@ -1048,63 +1069,81 @@ void DebugBackend::UpdateHookMode(unsigned long api, lua_State* L, lua_Debug* ho
     }
 
 #ifdef _KOOK_DECODA_
-	HookMode currentMode = GetHookMode(api, L);
-	if (m_mode != Mode_Continue)
-	{
-		if (currentMode != HookMode_Full)
-			SetHookMode(api, L, HookMode_Full);
-		return;
-	}
+	  HookMode currentMode = GetHookMode(api, L);
 
-	VirtualMachine* vm = GetVm(L);
-	if (!vm->haveActiveBreakpoints)
-	{
-		if (currentMode != HookMode_None)
-			SetHookMode(api, L, HookMode_None);
-		return;
-	}
-	
-	HookMode mode = HookMode_CallsOnly;
+	  VirtualMachine* vm = GetVm(L);
+	  if (!vm->haveActiveBreakpoints)
+	  {
+		  if (currentMode != HookMode_None)
+			  SetHookMode(api, L, HookMode_None);
+		  return;
+	  }
 
-	// Populate the line number and source name debug fields
-	lua_getinfo_dll(api, L, "S", hookEvent);
-	int linedefined = GetLineDefined(api, hookEvent);
+	  // Populate the line number and source name debug fields
+	  lua_getinfo_dll(api, L, "S", hookEvent);
+	  int linedefined = GetLineDefined(api, hookEvent);
 
-	if (GetIsHookEventCall(api, arevent) && linedefined != -1)
-	{
-		const char* arsource = GetSource(api, hookEvent);
-		vm->lastFunctions = arsource;
-		int scriptIndex;
-		if (arsource == vm->lastStepSource)
-			scriptIndex = vm->lastStepScript;
-		else {
-			vm->lastStepSource = arsource;
-			vm->lastStepScript = scriptIndex = GetScriptIndex(arsource);
-		}
+    if (linedefined == -1)
+      return;
 
-		if (scriptIndex == -1)
-		{
-			RegisterScript(api, L, hookEvent);
-			scriptIndex = GetScriptIndex(vm->lastFunctions.c_str());
-			vm->lastStepScript = scriptIndex;
-		}
+    HookMode mode = m_mode != Mode_Continue ? HookMode_Full : HookMode_CallsAndReturns;//HookMode_CallsOnly;
 
-		Script* script = scriptIndex != -1 ? m_scripts[scriptIndex] : NULL;
+    if (GetIsHookEventTailCall(api, arevent) || GetIsHookEventCall(api, arevent))
+	  {
+      ++vm->callStackDepth;
 
-		int lastlinedefined = GetLastLineDefined(api, hookEvent);
-		if (script && script->HasBreakpointsActive() && (
-			(linedefined == 0 && lastlinedefined == 0) || script->HasBreakPointInRange(linedefined, lastlinedefined)
-			))
-		{
-			mode = HookMode_Full;
-			vm->breakpointInStack = true;
-		}
-	}
+      if (mode != HookMode_Full)
+      {
+        const char* arsource = GetSource(api, hookEvent);
+        vm->lastFunctions = arsource;
+        int scriptIndex;
+        if (arsource == vm->lastStepSource)
+          scriptIndex = vm->lastStepScript;
+        else {
+          vm->lastStepSource = arsource;
+          vm->lastStepScript = scriptIndex = GetScriptIndex(arsource);
+        }
 
-	if (currentMode != mode)
-	{
-		SetHookMode(api, L, mode);
-	}
+        if (scriptIndex == -1)
+        {
+          RegisterScript(api, L, hookEvent);
+          scriptIndex = GetScriptIndex(vm->lastFunctions.c_str());
+          vm->lastStepScript = scriptIndex;
+        }
+
+        Script* script = scriptIndex != -1 ? m_scripts[scriptIndex] : NULL;
+
+        int lastlinedefined = GetLastLineDefined(api, hookEvent);
+        if (script && script->HasBreakpointsActive() && (
+          (linedefined == 0 && lastlinedefined == 0) || script->HasBreakPointInRange(linedefined - 1, lastlinedefined)
+          ))
+        {
+          mode = HookMode_Full;
+          vm->breakpointInStack = true;
+
+          vm->breakStack.push(vm->callStackDepth - 1);
+        }
+      }
+	  }
+    else if (GetIsHookEventRet(api, arevent))
+    {
+      if (vm->callStackDepth > 0)
+        --vm->callStackDepth;
+      while (!vm->breakStack.empty() && vm->breakStack.top() >= vm->callStackDepth)
+      {
+        vm->breakStack.pop();
+      }
+      if (!vm->breakStack.empty() && vm->breakStack.top() == vm->callStackDepth - 1)
+      {
+        mode = HookMode_Full;
+        vm->breakpointInStack = true;
+      }
+    }
+
+	  if (currentMode != mode)
+	  {
+		  SetHookMode(api, L, mode);
+	  }
 #else
     VirtualMachine* vm = GetVm(L);
     HookMode mode = HookMode_CallsOnly;
