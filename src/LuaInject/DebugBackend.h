@@ -428,6 +428,16 @@ private:
         std::string     name;
     };
 
+#ifdef _KOOK_DECODA_
+    struct BreakInfo
+    {
+        int depth;
+        const char* source;
+        int scriptIndex;
+        int breaked;
+    };
+#endif
+
     struct VirtualMachine
     {
         lua_State*      L;
@@ -438,8 +448,10 @@ private:
         int             lastStepLine;
         int             lastStepScript;
 #ifdef _KOOK_DECODA_
-		    const char*		  lastStepSource;
-        std::stack<int> breakStack;
+        const char*     lastStepSource;
+        std::vector<BreakInfo> breakStack;
+        size_t          breakStackTop;
+        HookMode        currentMode;
 #endif
         unsigned long   api;
         std::string     name;

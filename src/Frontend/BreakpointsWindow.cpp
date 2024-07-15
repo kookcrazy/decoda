@@ -152,13 +152,11 @@ void BreakpointsWindow::UpdateBreakpoints(Project::File* file)
 	}
 
 	int count = m_breakpointList->GetItemCount();
-	if (count == 0)
-		return;
 
 	int fbps_index = file->breakpoints.size() - 1;
 	unsigned int fbps_lastline = file->breakpoints[fbps_index];
 	bool changed = false;
-	long list_lastitem = count - 1;
+	long list_lastitem = count > 0 ? count - 1 : 0;
 
 	m_breakpointList->Freeze();
 	for (long i = count; i > 0; i--) {
@@ -208,6 +206,7 @@ void BreakpointsWindow::UpdateBreakpoints(Project::File* file)
 			fbps_lastline = file->breakpoints[fbps_index];
 		}
 	}
+
 	for (int i = fbps_index + 1; i > 0; i--) {
 		long item = m_breakpointList->InsertItem(list_lastitem, -1);
 		m_breakpointList->SetItemColumnImage(item, 0, 0);
@@ -222,6 +221,8 @@ void BreakpointsWindow::UpdateBreakpoints(Project::File* file)
 		breakpoint->line = file->breakpoints[i - 1];
 
 		m_breakpointList->SetItemPtrData(item, reinterpret_cast<wxUIntPtr>(breakpoint));
+
+        changed = true;
 	}
 	m_breakpointList->Thaw();
 
@@ -244,11 +245,6 @@ void BreakpointsWindow::ClearAllBreakpoints()
 		return;
 
 	m_breakpointList->Freeze();
-	for (int itemIndex = 0; itemIndex < count; ++itemIndex)
-	{
-		Breakpoint* breakpoint = reinterpret_cast<Breakpoint*>(m_breakpointList->GetItemData(itemIndex));
-		delete breakpoint;
-	}
 	m_breakpointList->DeleteAllItems();
 	m_breakpointList->Thaw();
 
@@ -267,7 +263,6 @@ void BreakpointsWindow::ClearBreakpoints(Project::File* file)
 		Breakpoint* breakpoint = reinterpret_cast<Breakpoint*>(m_breakpointList->GetItemData(i-1));
 		if (breakpoint->file == file) {
 			m_breakpointList->DeleteItem(i-1);
-			delete breakpoint;
 			found = true;
 		}
 	}

@@ -364,6 +364,7 @@ DebugBackend::VirtualMachine* DebugBackend::AttachState(unsigned long api, lua_S
     vm->haveActiveBreakpoints = false;
 #ifdef _KOOK_DECODA_
 	vm->lastStepSource		= NULL;
+    vm->breakStackTop       = 0;
 #endif
     
     m_vms.push_back(vm);
@@ -382,7 +383,11 @@ DebugBackend::VirtualMachine* DebugBackend::AttachState(unsigned long api, lua_S
     RegisterDebugLibrary(api, L);
 
     // Start debugging on this VM.
+#ifdef _KOOK_DECODA_
+    SetHookMode(api, L, HookMode_CallsAndReturns);
+#else
     SetHookMode(api, L, HookMode_Full);
+#endif
 
     // This state may be a thread which will be garbage collected, so we need to register
     // to recieve notification when it is destroyed.
@@ -788,31 +793,27 @@ void DebugBackend::HookCallback(unsigned long api, lua_State* L, lua_Debug* ar)
 
     }
 
-    // Get the name of the VM. Polling like this is pretty excessive since the
-    // name won't change often, but it's the easiest way and works fine.
-
-    lua_rawgetglobal_dll(api, L, "decoda_name");
-    const char* name = lua_tostring_dll(api, L, -1);
-
-    if (name == NULL)
-    {
-        name = "";
-    }
-
-    if (name != vm->name)
-    {
-        vm->name = name;
-        m_eventChannel.WriteUInt32(EventId_NameVM);
-        m_eventChannel.WriteUInt32(reinterpret_cast<int>(L));
-        m_eventChannel.WriteString(vm->name);
-    }
-
-    lua_pop_dll(api, L, 1);
-
-    // Log for debugging.
-    //LogHookEvent(api, L, ar);
-
 #ifdef _KOOK_DECODA_
+    if (vm->name.empty())
+    {
+      lua_rawgetglobal_dll(api, L, "decoda_name");
+      const char* name = lua_tostring_dll(api, L, -1);
+
+      if (name == NULL)
+      {
+        name = "<unknow>";
+      }
+
+      vm->name = name;
+      m_eventChannel.WriteUInt32(EventId_NameVM);
+      m_eventChannel.WriteUInt32(reinterpret_cast<int>(L));
+      m_eventChannel.WriteString(vm->name);
+
+      lua_pop_dll(api, L, 1);
+    }
+
+    vm->currentMode = GetHookMode(api, L);
+
     int arevent = GetEvent(api, ar);
     if (arevent == LUA_HOOKLINE)
     {
@@ -835,6 +836,10 @@ void DebugBackend::HookCallback(unsigned long api, lua_State* L, lua_Debug* ar)
           stop = true;
         }
         break;
+      default:
+        UpdateHookMode(api, L, ar);
+        if (vm->currentMode == HookMode_Full)
+          check = true;
       }
 
       while (check || stop) {
@@ -921,9 +926,10 @@ void DebugBackend::HookCallback(unsigned long api, lua_State* L, lua_Debug* ar)
       else
       {
         UpdateHookMode(api, L, ar);
-        if (GetHookMode(api, L) != HookMode_Full)
+        if (vm->currentMode != HookMode_Full)
         {
           SetHookMode(api, L, HookMode_Full);
+          vm->currentMode = HookMode_Full;
         }
       }
       if (m_mode == Mode_StepOver || m_mode == Mode_StepOut)
@@ -943,6 +949,29 @@ void DebugBackend::HookCallback(unsigned long api, lua_State* L, lua_Debug* ar)
       m_criticalSection.Exit();
     }
 #else
+    // Get the name of the VM. Polling like this is pretty excessive since the
+    // name won't change often, but it's the easiest way and works fine.
+
+    lua_rawgetglobal_dll(api, L, "decoda_name");
+    const char* name = lua_tostring_dll(api, L, -1);
+
+    if (name == NULL)
+    {
+      name = "";
+    }
+
+    if (name != vm->name)
+    {
+      vm->name = name;
+      m_eventChannel.WriteUInt32(EventId_NameVM);
+      m_eventChannel.WriteUInt32(reinterpret_cast<int>(L));
+      m_eventChannel.WriteString(vm->name);
+    }
+
+    lua_pop_dll(api, L, 1);
+
+    // Log for debugging.
+    //LogHookEvent(api, L, ar);
 
     //Only try to downgrade the hook when the debugger is not stepping   
     if(m_mode == Mode_Continue)
@@ -1069,81 +1098,120 @@ void DebugBackend::UpdateHookMode(unsigned long api, lua_State* L, lua_Debug* ho
     }
 
 #ifdef _KOOK_DECODA_
-	  HookMode currentMode = GetHookMode(api, L);
+	VirtualMachine* vm = GetVm(L);
+	if (!vm->haveActiveBreakpoints)
+	{
+        if (vm->currentMode != HookMode_None)
+        {
+            SetHookMode(api, L, HookMode_None);
+            vm->currentMode = HookMode_None;
+        }
+		return;
+	}
 
-	  VirtualMachine* vm = GetVm(L);
-	  if (!vm->haveActiveBreakpoints)
-	  {
-		  if (currentMode != HookMode_None)
-			  SetHookMode(api, L, HookMode_None);
-		  return;
-	  }
-
-	  // Populate the line number and source name debug fields
-	  lua_getinfo_dll(api, L, "S", hookEvent);
-	  int linedefined = GetLineDefined(api, hookEvent);
-
-    if (linedefined == -1)
-      return;
-
+    HookMode currentMode = vm->currentMode;
     HookMode mode = m_mode != Mode_Continue ? HookMode_Full : HookMode_CallsAndReturns;//HookMode_CallsOnly;
 
-    if (GetIsHookEventTailCall(api, arevent) || GetIsHookEventCall(api, arevent))
-	  {
-      ++vm->callStackDepth;
-
-      if (mode != HookMode_Full)
+    if (GetIsHookEventTailCall(api, arevent))
+	{
+      while (vm->breakStackTop > 0)
       {
-        const char* arsource = GetSource(api, hookEvent);
-        vm->lastFunctions = arsource;
-        int scriptIndex;
-        if (arsource == vm->lastStepSource)
-          scriptIndex = vm->lastStepScript;
-        else {
-          vm->lastStepSource = arsource;
-          vm->lastStepScript = scriptIndex = GetScriptIndex(arsource);
-        }
-
-        if (scriptIndex == -1)
-        {
-          RegisterScript(api, L, hookEvent);
-          scriptIndex = GetScriptIndex(vm->lastFunctions.c_str());
-          vm->lastStepScript = scriptIndex;
-        }
-
-        Script* script = scriptIndex != -1 ? m_scripts[scriptIndex] : NULL;
-
-        int lastlinedefined = GetLastLineDefined(api, hookEvent);
-        if (script && script->HasBreakpointsActive() && (
-          (linedefined == 0 && lastlinedefined == 0) || script->HasBreakPointInRange(linedefined - 1, lastlinedefined)
-          ))
-        {
-          mode = HookMode_Full;
-          vm->breakpointInStack = true;
-
-          vm->breakStack.push(vm->callStackDepth - 1);
-        }
+        BreakInfo &info = vm->breakStack[vm->breakStackTop - 1];
+        if (info.depth >= vm->callStackDepth - 1)
+          vm->breakStackTop--;
+        else
+          break;
       }
-	  }
+	}
+    else if (GetIsHookEventCall(api, arevent))
+    {
+      ++vm->callStackDepth;
+    }
     else if (GetIsHookEventRet(api, arevent))
     {
       if (vm->callStackDepth > 0)
         --vm->callStackDepth;
-      while (!vm->breakStack.empty() && vm->breakStack.top() >= vm->callStackDepth)
+      while (vm->breakStackTop > 0)
       {
-        vm->breakStack.pop();
+        BreakInfo &info = vm->breakStack[vm->breakStackTop - 1];
+        if (info.depth >= vm->callStackDepth)
+          vm->breakStackTop--;
+        else
+          break;
       }
-      if (!vm->breakStack.empty() && vm->breakStack.top() == vm->callStackDepth - 1)
+      if (vm->breakStackTop > 0)
+      {
+        BreakInfo &info = vm->breakStack[vm->breakStackTop - 1];
+        if (info.depth == vm->callStackDepth - 1)
+        {
+          if (info.breaked)
+          {
+            mode = HookMode_Full;
+            vm->breakpointInStack = true;
+          }
+          vm->lastStepSource = info.source;
+          vm->lastStepScript = info.scriptIndex;
+        }
+      }
+      hookEvent = NULL;
+    }
+
+    if (mode != HookMode_Full && hookEvent)
+    {
+      // Populate the line number and source name debug fields
+      lua_getinfo_dll(api, L, "S", hookEvent);
+      int linedefined = GetLineDefined(api, hookEvent);
+
+      if (linedefined == -1)
+        return;
+
+      const char* arsource = GetSource(api, hookEvent);
+      vm->lastFunctions = arsource;
+      int scriptIndex;
+      if (arsource == vm->lastStepSource)
+        scriptIndex = vm->lastStepScript;
+      else {
+        vm->lastStepSource = arsource;
+        vm->lastStepScript = scriptIndex = GetScriptIndex(arsource);
+      }
+
+      if (scriptIndex == -1)
+      {
+        RegisterScript(api, L, hookEvent);
+        scriptIndex = GetScriptIndex(vm->lastFunctions.c_str());
+        vm->lastStepScript = scriptIndex;
+      }
+
+      if (vm->breakStackTop >= vm->breakStack.size())
+      {
+        vm->breakStack.emplace_back();
+      }
+      BreakInfo &info = vm->breakStack[vm->breakStackTop++];
+      info.depth = vm->callStackDepth - 1;
+      info.source = arsource;
+      info.scriptIndex = scriptIndex;
+
+      Script* script = scriptIndex != -1 ? m_scripts[scriptIndex] : NULL;
+
+      int lastlinedefined = GetLastLineDefined(api, hookEvent);
+      if (script && script->HasBreakpointsActive() && (
+        (linedefined == 0 && lastlinedefined == 0) || script->HasBreakPointInRange(linedefined - 1, lastlinedefined)
+        ))
       {
         mode = HookMode_Full;
         vm->breakpointInStack = true;
+
+        info.breaked = true;
       }
+      else
+        info.breaked = false;
     }
 
-	  if (currentMode != mode)
-	  {
-		  SetHookMode(api, L, mode);
-	  }
+    if (currentMode != mode)
+    {
+      SetHookMode(api, L, mode);
+      vm->currentMode = mode;
+    }
 #else
     VirtualMachine* vm = GetVm(L);
     HookMode mode = HookMode_CallsOnly;
